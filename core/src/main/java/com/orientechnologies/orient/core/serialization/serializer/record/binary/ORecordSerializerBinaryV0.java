@@ -154,7 +154,7 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
   }
 
   @Override
-  public OBinaryField deserializeField(BytesContainer bytes, OClass iClass, String iFieldName) {
+  public OBinaryField deserializeField(BytesContainer bytes, OClass iClass, String iFieldName, boolean embedded) {
     // SKIP CLASS NAME
     final int classNameLen = OVarIntSerializer.readAsInteger(bytes);
     bytes.skip(classNameLen);
@@ -226,11 +226,6 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
         bytes.skip(OIntegerSerializer.INT_SIZE + (prop.getType() != OType.ANY ? 0 : 1));
       }
     }
-  }
-
-  @Override
-  public OBinaryField deserializeFieldWithClassName(final BytesContainer bytes, final OClass iClass, final String iFieldName) {
-    return deserializeField(bytes, iClass, iFieldName);
   }
 
   public void deserializeWithClassName(final ODocument document, final BytesContainer bytes) {
@@ -332,20 +327,11 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
     return result.toArray(new String[result.size()]);
   }
 
-  @Override
-  public void serializeWithClassName(final ODocument document, final BytesContainer bytes, final boolean iClassOnly) {
-    serialize(document, bytes, iClassOnly);
-  }
-
   @SuppressWarnings("unchecked")
   @Override
-  public void serialize(final ODocument document, final BytesContainer bytes, final boolean iClassOnly) {
+  public void serialize(final ODocument document, final BytesContainer bytes) {
 
     final OClass clazz = serializeClass(document, bytes);
-    if (iClassOnly) {
-      writeEmptyString(bytes);
-      return;
-    }
 
     final Map<String, OProperty> props = clazz != null ? clazz.propertiesMap() : null;
 
@@ -905,9 +891,9 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
       if (value instanceof ODocumentSerializable) {
         ODocument cur = ((ODocumentSerializable) value).toDocument();
         cur.field(ODocumentSerializable.CLASS_NAME, value.getClass().getName());
-        serializeWithClassName(cur, bytes, false);
+        serialize(cur, bytes);
       } else {
-        serializeWithClassName((ODocument) value, bytes, false);
+        serialize((ODocument) value, bytes);
       }
       break;
     case EMBEDDEDSET:
@@ -1052,7 +1038,7 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
     bytes.skip(classNameLen);
   }
 
-  private int getEmbeddedFieldSize(BytesContainer bytes, int currentFieldDataPos, int serializerVersion, OType type) {
+  private int getEmbeddedFieldSize(BytesContainer bytes, int currentFieldDataPos, OType type) {
     int startOffset = bytes.offset;
     try {
       //try to read next position in header if exists
@@ -1077,10 +1063,10 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
     }
   }
 
-  protected <RET> RET deserializeFieldTypedLoopAndReturn(BytesContainer bytes, String iFieldName, int serializerVersion) {
+  protected <RET> RET deserializeFieldTypedLoopAndReturn(BytesContainer bytes, String iFieldName) {
     final byte[] field = iFieldName.getBytes();
 
-    final OMetadataInternal metadata = (OMetadataInternal) ODatabaseRecordThreadLocal.instance().get().getMetadata();
+    final OMetadataInternal metadata = ODatabaseRecordThreadLocal.instance().get().getMetadata();
     final OImmutableSchema _schema = metadata.getImmutableSchemaSnapshot();
 
     while (true) {
@@ -1114,7 +1100,7 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
           //actual field byte length is only needed for embedded fields
           int fieldDataLength = -1;
           if (type.isEmbedded()) {
-            fieldDataLength = getEmbeddedFieldSize(bytes, valuePos, serializerVersion, type);
+            fieldDataLength = getEmbeddedFieldSize(bytes, valuePos, type);
           }
 
           bytes.offset = valuePos;
@@ -1139,7 +1125,7 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
 
           int fieldDataLength = -1;
           if (type.isEmbedded()) {
-            fieldDataLength = getEmbeddedFieldSize(bytes, valuePos, serializerVersion, type);
+            fieldDataLength = getEmbeddedFieldSize(bytes, valuePos, type);
           }
 
           if (valuePos == 0)
@@ -1156,10 +1142,10 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
   }
 
   @Override
-  public <RET> RET deserializeFieldTyped(BytesContainer bytes, String iFieldName, boolean isEmbedded, int serializerVersion) {
+  public <RET> RET deserializeFieldTyped(BytesContainer bytes, String iFieldName, boolean isEmbedded) {
     // SKIP CLASS NAME        
     skipClassName(bytes);
-    return deserializeFieldTypedLoopAndReturn(bytes, iFieldName, serializerVersion);
+    return deserializeFieldTypedLoopAndReturn(bytes, iFieldName);
   }
 
   public Tuple<Integer, OType> getPointerAndTypeFromCurrentPosition(BytesContainer bytes) {
