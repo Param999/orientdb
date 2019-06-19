@@ -5220,7 +5220,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
 
       case ORecordOperation.CREATED: {
 
-        final byte[] stream = serializer.toStream(rec, false);
+        final byte[] stream = serializer.toStream(rec);
         if (allocated != null) {
           final OPhysicalPosition ppos;
           final byte recordType = ORecordInternal.getRecordType(rec);
@@ -5241,7 +5241,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
       }
 
       case ORecordOperation.UPDATED: {
-        final byte[] stream = serializer.toStream(rec, false);
+        final byte[] stream = serializer.toStream(rec);
 
         final OStorageOperationResult<Integer> updateRes = doUpdateRecord(rid, ORecordInternal.isContentChanged(rec), stream,
             rec.getVersion(), ORecordInternal.getRecordType(rec), null, cluster);

@@ -2554,7 +2554,7 @@ public class ODocument extends ORecordAbstract
     stream.write(idBuffer);
     stream.writeInt(recordVersion);
 
-    final byte[] content = serializer.toStream(this, false);
+    final byte[] content = serializer.toStream(this);
     stream.writeInt(content.length);
     stream.write(content);
 
@@ -3102,7 +3102,7 @@ public class ODocument extends ORecordAbstract
     status = STATUS.MARSHALLING;
     try {
       if (source == null)
-        source = recordFormat.toStream(this, iOnlyDelta);
+        source = recordFormat.toStream(this);
     } finally {
       status = prev;
     }
@@ -3997,7 +3997,7 @@ public class ODocument extends ORecordAbstract
     return delete;
   }
 
-  public ODocumentDelta getDeltaFromOriginal() {
+  protected ODocumentDelta getDeltaFromOriginal() {
     ODocumentDelta ret = new ODocumentDelta();
     ODocumentDelta updated = getDeltaFromOriginalForUpdate();
     ret.field("u", new ValueType(updated, ODeltaDocumentFieldType.DELTA_RECORD));
@@ -4015,7 +4015,7 @@ public class ODocument extends ORecordAbstract
     return ret;
   }
 
-  public boolean isChangedInDepth() {
+  protected boolean isChangedInDepth() {
     for (Map.Entry<String, ODocumentEntry> field : fields.entrySet()) {
       if (field.getValue().isChangedTree(new ArrayList<>())) {
         return true;
@@ -4024,7 +4024,7 @@ public class ODocument extends ORecordAbstract
     return false;
   }
 
-  public boolean hasNonExistingInDepth() {
+  protected boolean hasNonExistingInDepth() {
     for (Map.Entry<String, ODocumentEntry> field : fields.entrySet()) {
       if (field.getValue().hasNonExistingTree()) {
         return true;
