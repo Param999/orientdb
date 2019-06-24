@@ -16,7 +16,6 @@ import com.orientechnologies.orient.core.serialization.serializer.record.binary.
 import com.orientechnologies.orient.core.storage.ORecordDuplicatedException;
 import com.orientechnologies.orient.distributed.impl.ODatabaseDocumentDistributed;
 import com.orientechnologies.orient.distributed.impl.coordinator.*;
-import com.orientechnologies.orient.distributed.impl.coordinator.network.OOperationRequest;
 import com.orientechnologies.orient.distributed.impl.coordinator.transaction.OTransactionFirstPhaseResult.Type;
 import com.orientechnologies.orient.distributed.impl.coordinator.transaction.results.OConcurrentModificationResult;
 import com.orientechnologies.orient.distributed.impl.coordinator.transaction.results.OExceptionResult;
@@ -107,8 +106,8 @@ public class OTransactionFirstPhaseOperation implements ONodeRequest {
         }
         break;
       }
-      if (type == ORecordOperation.CREATED || type == ORecordOperation.DELETED ||
-          (type == ORecordOperation.UPDATED && !useDeltas)){
+      if (type == ORecordOperation.CREATED || type == ORecordOperation.DELETED || (type == ORecordOperation.UPDATED
+          && !useDeltas)) {
         ORecordInternal.setIdentity(record, (ORecordId) req.getId());
         ORecordInternal.setVersion(record, req.getVersion());
         ORecordOperation op = new ORecordOperation(record, type);

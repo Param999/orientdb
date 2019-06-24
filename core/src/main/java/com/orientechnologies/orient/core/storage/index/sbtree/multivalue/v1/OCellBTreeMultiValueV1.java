@@ -42,14 +42,7 @@ import com.orientechnologies.orient.core.storage.impl.local.paginated.base.ODura
 import com.orientechnologies.orient.core.storage.index.sbtree.multivalue.OCellBTreeMultiValue;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * This is implementation which is based on B+-tree implementation threaded tree.
@@ -2158,10 +2151,14 @@ public final class OCellBTreeMultiValueV1<K> extends ODurableComponent implement
                   break mainCycle;
                 }
 
-                if (fromKey != null && (fromKeyInclusive ?
-                    comparator.compare(key, fromKey) < 0 :
-                    comparator.compare(key, fromKey) <= 0)) {
-                  continue;
+                if (fromKeyInclusive) {
+                  if (fromKey != null && comparator.compare(key, fromKey) < 0) {
+                    continue;
+                  }
+                } else {
+                  if (fromKey != null && comparator.compare(key, fromKey) <= 0) {
+                    continue;
+                  }
                 }
 
                 if (toKey != null && (toKeyInclusive ? comparator.compare(key, toKey) > 0 : comparator.compare(key, toKey) >= 0)) {
@@ -2396,10 +2393,14 @@ public final class OCellBTreeMultiValueV1<K> extends ODurableComponent implement
                   continue;
                 }
 
-                if (fromKey != null && (fromKeyInclusive ?
-                    comparator.compare(key, fromKey) < 0 :
-                    comparator.compare(key, fromKey) <= 0)) {
-                  break mainCycle;
+                if (fromKeyInclusive) {
+                  if (fromKey != null && comparator.compare(key, fromKey) < 0) {
+                    break mainCycle;
+                  }
+                } else {
+                  if (fromKey != null && comparator.compare(key, fromKey) <= 0) {
+                    break mainCycle;
+                  }
                 }
 
                 lastKey = key;

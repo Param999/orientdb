@@ -21,7 +21,6 @@ package com.orientechnologies.common.concur.lock;
 
 import com.orientechnologies.common.exception.OException;
 
-import java.util.Collection;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -50,8 +49,6 @@ public class OComparableLockManager<T extends  Comparable> {
   }
 
   public OComparableLockManager(final boolean iEnabled, final int iAcquireTimeout, final int concurrencyLevel) {
-    final int cL = closestInteger(concurrencyLevel);
-
     map = new ConcurrentSkipListMap<T, CountableLock>();
 
     acquireTimeout = iAcquireTimeout;
@@ -177,9 +174,10 @@ public class OComparableLockManager<T extends  Comparable> {
   }
 
   private static int defaultConcurrency() {
-    return (Runtime.getRuntime().availableProcessors() << 6) > DEFAULT_CONCURRENCY_LEVEL ?
-        (Runtime.getRuntime().availableProcessors() << 6) :
-        DEFAULT_CONCURRENCY_LEVEL;
+    if ((Runtime.getRuntime().availableProcessors() << 6) > DEFAULT_CONCURRENCY_LEVEL)
+      return Runtime.getRuntime().availableProcessors() << 6;
+    else
+      return DEFAULT_CONCURRENCY_LEVEL;
   }
 
   private static int closestInteger(int value) {

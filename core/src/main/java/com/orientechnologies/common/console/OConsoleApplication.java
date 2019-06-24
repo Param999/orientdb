@@ -25,28 +25,14 @@ import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.common.parser.OStringParser;
 import com.orientechnologies.common.util.OArrays;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.PrintStream;
+import java.io.*;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.ServiceLoader;
-import java.util.TreeMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -487,8 +473,6 @@ public class OConsoleApplication {
     if (isComment(iCommand))
       // COMMENT: JUMP IT
       return null;
-
-    final StringBuilder lastCommandInvoked = new StringBuilder(1024);
 
     final String commandLowerCase = iCommand.toLowerCase(Locale.ENGLISH);
 

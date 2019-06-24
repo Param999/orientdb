@@ -23,7 +23,6 @@ import com.orientechnologies.common.concur.OOfflineNodeException;
 import com.orientechnologies.common.concur.lock.OSimpleLockManager;
 import com.orientechnologies.common.concur.lock.OSimpleLockManagerImpl;
 import com.orientechnologies.common.exception.OException;
-import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.common.profiler.OAbstractProfiler;
 import com.orientechnologies.common.profiler.OProfiler;
 import com.orientechnologies.common.util.OCallable;
@@ -38,22 +37,25 @@ import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
 import com.orientechnologies.orient.core.storage.ORawBuffer;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OLogSequenceNumber;
+import com.orientechnologies.orient.distributed.hazelcast.OHazelcastPlugin;
+import com.orientechnologies.orient.distributed.impl.task.ODistributedLockTask;
+import com.orientechnologies.orient.distributed.impl.task.OWaitForTask;
 import com.orientechnologies.orient.server.OServer;
 import com.orientechnologies.orient.server.OSystemDatabase;
 import com.orientechnologies.orient.server.distributed.*;
 import com.orientechnologies.orient.server.distributed.ODistributedServerLog.DIRECTION;
-import com.orientechnologies.orient.distributed.impl.task.ODistributedLockTask;
-import com.orientechnologies.orient.distributed.impl.task.OWaitForTask;
 import com.orientechnologies.orient.server.distributed.task.OAbstractRemoteTask;
 import com.orientechnologies.orient.server.distributed.task.ODistributedOperationException;
 import com.orientechnologies.orient.server.distributed.task.ODistributedRecordLockedException;
 import com.orientechnologies.orient.server.distributed.task.ORemoteTask;
-import com.orientechnologies.orient.distributed.hazelcast.OHazelcastPlugin;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -139,7 +141,6 @@ public class ODistributedDatabaseImpl implements ODistributedDatabase {
     }
 
     startTxTimeoutTimerTask();
-
 
     Orient.instance().getProfiler()
         .registerHookValue("distributed.db." + databaseName + ".msgSent", "Number of replication messages sent from current node",
@@ -478,10 +479,13 @@ public class ODistributedDatabaseImpl implements ODistributedDatabase {
           .getNodesConcurInQuorum(manager, cfg, iRequest, iNodes, databaseName, localResult);
 
       // AFTER COMPUTED THE QUORUM, REMOVE THE OFFLINE NODES TO HAVE THE LIST OF REAL AVAILABLE NODES
-      final int availableNodes = checkNodesAreOnline ?
-          manager.getNodesWithStatus(iNodes, databaseName, ODistributedServerManager.DB_STATUS.ONLINE,
-              ODistributedServerManager.DB_STATUS.BACKUP, ODistributedServerManager.DB_STATUS.SYNCHRONIZING) :
-          iNodes.size();
+      final int availableNodes;
+      if (checkNodesAreOnline) {
+        availableNodes = manager.getNodesWithStatus(iNodes, databaseName, ODistributedServerManager.DB_STATUS.ONLINE,
+            ODistributedServerManager.DB_STATUS.BACKUP, ODistributedServerManager.DB_STATUS.SYNCHRONIZING);
+      } else {
+        availableNodes = iNodes.size();
+      }
 
       final int expectedResponses = localResult != null ? availableNodes + 1 : availableNodes;
 
@@ -576,10 +580,9 @@ public class ODistributedDatabaseImpl implements ODistributedDatabase {
     } catch (RuntimeException e) {
       throw e;
     } catch (Exception e) {
+      String names = iClusterNames != null ? "." + iClusterNames : "";
       throw OException.wrapException(new ODistributedException(
-          "Error on executing distributed request (" + iRequest + ") against database '" + databaseName + (iClusterNames != null ?
-              "." + iClusterNames :
-              "") + "' to nodes " + iNodes), e);
+          "Error on executing distributed request (" + iRequest + ") against database '" + databaseName + names + "' to nodes " + iNodes), e);
     } finally {
       if (iAfterSentCallback != null && !afterSendCallBackCalled)
         iAfterSentCallback.call(iRequest.getId());
