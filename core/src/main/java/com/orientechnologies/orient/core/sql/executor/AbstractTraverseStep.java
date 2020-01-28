@@ -9,6 +9,7 @@ import com.orientechnologies.orient.core.sql.parser.OWhereClause;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Created by luigidellaquila on 26/10/16.
@@ -22,14 +23,17 @@ public abstract class AbstractTraverseStep extends AbstractExecutionStep {
   protected List<OResult> results     = new ArrayList<>();
   private   long          cost        = 0;
 
-  Set<ORID> traversed = new ORidSet();
+  protected Set<ORID> traversed = new ORidSet();
 
   public AbstractTraverseStep(List<OTraverseProjectionItem> projections, OWhereClause whileClause, OInteger maxDepth,
       OCommandContext ctx, boolean profilingEnabled) {
     super(ctx, profilingEnabled);
     this.whileClause = whileClause;
     this.maxDepth = maxDepth;
-    this.projections = projections.stream().map(x -> x.copy()).collect(Collectors.toList());
+
+    try (final Stream<OTraverseProjectionItem> stream = projections.stream()) {
+      this.projections = stream.map(OTraverseProjectionItem::copy).collect(Collectors.toList());
+    }
   }
 
   @Override
@@ -37,7 +41,7 @@ public abstract class AbstractTraverseStep extends AbstractExecutionStep {
     //TODO
 
     return new OResultSet() {
-      int localFetched = 0;
+      private int localFetched = 0;
 
       @Override
       public boolean hasNext() {

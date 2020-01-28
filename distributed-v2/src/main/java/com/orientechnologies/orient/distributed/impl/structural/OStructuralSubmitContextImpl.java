@@ -1,21 +1,33 @@
 package com.orientechnologies.orient.distributed.impl.structural;
 
-import com.orientechnologies.orient.distributed.impl.coordinator.ODistributedChannel;
+import com.orientechnologies.common.concur.lock.OInterruptedException;
+import com.orientechnologies.common.exception.OException;
+import com.orientechnologies.orient.core.db.config.ONodeIdentity;
+import com.orientechnologies.orient.core.exception.ODatabaseException;
+import com.orientechnologies.orient.distributed.OrientDBDistributed;
 import com.orientechnologies.orient.distributed.impl.coordinator.transaction.OSessionOperationId;
+import com.orientechnologies.orient.distributed.impl.structural.submit.OStructuralSubmitRequest;
+import com.orientechnologies.orient.distributed.impl.structural.submit.OStructuralSubmitResponse;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
 public class OStructuralSubmitContextImpl implements OStructuralSubmitContext {
 
   private Map<OSessionOperationId, CompletableFuture<OStructuralSubmitResponse>> operations = new HashMap<>();
-  private ODistributedChannel                                                    channel;
+  private ONodeIdentity                                                          leader;
+  private OrientDBDistributed                                                    orientDB;
+
+  public OStructuralSubmitContextImpl(OrientDBDistributed orientDB) {
+    this.orientDB = orientDB;
+  }
 
   @Override
   public synchronized Future<OStructuralSubmitResponse> send(OSessionOperationId operationId, OStructuralSubmitRequest request) {
-    while (channel == null) {
+    while (leader == null) {
       try {
         this.wait();
       } catch (InterruptedException e) {
@@ -24,8 +36,19 @@ public class OStructuralSubmitContextImpl implements OStructuralSubmitContext {
     }
     CompletableFuture<OStructuralSubmitResponse> value = new CompletableFuture<>();
     operations.put(operationId, value);
-    channel.submit(operationId, request);
+    orientDB.getNetworkManager().submit(leader, operationId, request);
     return value;
+  }
+
+  public OStructuralSubmitResponse sendAndWait(OSessionOperationId operationId, OStructuralSubmitRequest request) {
+    Future<OStructuralSubmitResponse> future = send(operationId, request);
+    try {
+      return future.get();
+    } catch (InterruptedException e) {
+      throw OException.wrapException(new OInterruptedException("Interrupted waiting for distributed response"), e);
+    } catch (ExecutionException e) {
+      throw OException.wrapException(new ODatabaseException("Error on execution of distributed request"), e);
+    }
   }
 
   @Override
@@ -37,8 +60,8 @@ public class OStructuralSubmitContextImpl implements OStructuralSubmitContext {
   }
 
   @Override
-  public synchronized void setLeader(ODistributedChannel channel) {
-    this.channel = channel;
+  public synchronized void setLeader(ONodeIdentity leader) {
+    this.leader = leader;
     notifyAll();
   }
 

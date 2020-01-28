@@ -4,7 +4,6 @@ import com.orientechnologies.common.util.OPair;
 import com.orientechnologies.orient.core.command.OBasicCommandContext;
 import com.orientechnologies.orient.core.command.OCommandContext;
 import com.orientechnologies.orient.core.db.ODatabase;
-import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.exception.OCommandExecutionException;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.metadata.schema.OSchema;
@@ -20,21 +19,21 @@ public class OMatchExecutionPlanner {
 
   static final String DEFAULT_ALIAS_PREFIX = "$ORIENT_DEFAULT_ALIAS_";
 
-  protected List<OMatchExpression>  matchExpressions;
-  protected List<OMatchExpression>  notMatchExpressions;
-  protected List<OExpression>       returnItems;
-  protected List<OIdentifier>       returnAliases;
-  protected List<ONestedProjection> returnNestedProjections;
-  boolean returnElements     = false;
-  boolean returnPaths        = false;
-  boolean returnPatterns     = false;
-  boolean returnPathElements = false;
-  boolean returnDistinct     = false;
-  protected     OSkip    skip;
-  private final OGroupBy groupBy;
-  private final OOrderBy orderBy;
-  private final OUnwind  unwind;
-  protected     OLimit   limit;
+  protected     List<OMatchExpression>  matchExpressions;
+  protected     List<OMatchExpression>  notMatchExpressions;
+  protected     List<OExpression>       returnItems;
+  protected     List<OIdentifier>       returnAliases;
+  protected     List<ONestedProjection> returnNestedProjections;
+  private       boolean                 returnElements     = false;
+  private       boolean                 returnPaths        = false;
+  private       boolean                 returnPatterns     = false;
+  private       boolean                 returnPathElements = false;
+  private       boolean                 returnDistinct     = false;
+  protected     OSkip                   skip;
+  private final OGroupBy                groupBy;
+  private final OOrderBy                orderBy;
+  private final OUnwind                 unwind;
+  protected     OLimit                  limit;
 
   //post-parsing
   private Pattern                   pattern;
@@ -43,8 +42,8 @@ public class OMatchExecutionPlanner {
   private Map<String, String>       aliasClasses;
   private Map<String, String>       aliasClusters;
   private Map<String, ORid>         aliasRids;
-  boolean foundOptional = false;
-  private long threshold = 100;
+  private boolean                   foundOptional = false;
+  private long                      threshold     = 100;
 
   public OMatchExecutionPlanner(OMatchStatement stm) {
     this.matchExpressions = stm.getMatchExpressions().stream().map(x -> x.copy()).collect(Collectors.toList());
@@ -425,7 +424,7 @@ public class OMatchExecutionPlanner {
           visitedEdges.add(edge);
           resultingSchedule.add(new EdgeTraversal(edge, traversalDirection));
         }
-      } else if (!startNode.optional) {
+      } else if (!startNode.optional || isOptionalChain(startNode, edge, neighboringNode)) {
         // If the neighboring node wasn't visited, we don't expand the optional node into it, hence the above check.
         // Instead, we'll allow the neighboring node to add the edge we failed to visit, via the above block.
         if (visitedEdges.contains(edge)) {
@@ -440,11 +439,32 @@ public class OMatchExecutionPlanner {
     }
   }
 
+  private boolean isOptionalChain(PatternNode startNode, PatternEdge edge, PatternNode neighboringNode) {
+    return isOptionalChain(startNode, edge, neighboringNode, new HashSet<>());
+  }
+
+  private boolean isOptionalChain(PatternNode startNode, PatternEdge edge, PatternNode neighboringNode, Set<PatternEdge> visitedEdges) {
+    if (!startNode.isOptionalNode() || !neighboringNode.isOptionalNode()) {
+      return false;
+    }
+
+    visitedEdges.add(edge);
+
+    if (neighboringNode.out != null) {
+      for (PatternEdge patternEdge : neighboringNode.out) {
+        if (!visitedEdges.contains(patternEdge) && !isOptionalChain(neighboringNode, patternEdge, patternEdge.in, visitedEdges)) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
   /**
    * Calculate the set of dependency aliases for each alias in the pattern.
    *
    * @param pattern
-   *
    * @return map of alias to the set of aliases it depends on
    */
   private Map<String, Set<String>> getDependencies(Pattern pattern) {
@@ -697,9 +717,15 @@ public class OMatchExecutionPlanner {
 
     Map<String, Long> result = new LinkedHashMap<String, Long>();
     for (String alias : allAliases) {
+      ORid rid = aliasRids.get(alias);
+      if (rid != null) {
+        result.put(alias, 1L);
+        continue;
+      }
+      
       String className = aliasClasses.get(alias);
       String clusterName = aliasClusters.get(alias);
-      ORid rid = aliasRids.get(alias);
+
       if (className == null && clusterName == null) {
         continue;
       }
@@ -736,8 +762,6 @@ public class OMatchExecutionPlanner {
         } else {
           result.put(alias, db.countClusterElements(clusterName));
         }
-      } else if (rid != null) {
-        result.put(alias, 1L);
       }
     }
     return result;

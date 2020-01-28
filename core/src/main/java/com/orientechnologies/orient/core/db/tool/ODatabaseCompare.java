@@ -22,13 +22,13 @@ package com.orientechnologies.orient.core.db.tool;
 import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.orient.core.command.OCommandOutputListener;
 import com.orientechnologies.orient.core.config.OStorageConfiguration;
+import com.orientechnologies.orient.core.db.ODatabase;
 import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
-import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
 import com.orientechnologies.orient.core.index.OIndex;
-import com.orientechnologies.orient.core.index.OIndexKeyCursor;
+import com.orientechnologies.orient.core.index.OIndexInternal;
 import com.orientechnologies.orient.core.index.OIndexManagerAbstract;
 import com.orientechnologies.orient.core.metadata.OMetadataDefault;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
@@ -43,14 +43,14 @@ import com.orientechnologies.orient.core.storage.OPhysicalPosition;
 import com.orientechnologies.orient.core.storage.ORawBuffer;
 import com.orientechnologies.orient.core.storage.OStorage;
 
-import java.io.IOException;
 import java.util.*;
+import java.util.stream.Stream;
 
 import static com.orientechnologies.orient.core.record.impl.ODocumentHelper.makeDbCall;
 
 public class ODatabaseCompare extends ODatabaseImpExpAbstract {
-  private ODatabaseDocumentInternal databaseOne;
-  private ODatabaseDocumentInternal databaseTwo;
+  private final ODatabaseDocumentInternal databaseOne;
+  private final ODatabaseDocumentInternal databaseTwo;
 
   private boolean compareEntriesForAutomaticIndexes = false;
   private boolean autoDetectExportImportMap         = true;
@@ -58,20 +58,24 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
   private int     differences          = 0;
   private boolean compareIndexMetadata = false;
 
-  private Set<String> excludeIndexes = new HashSet<>();
+  private final Set<String> excludeIndexes = new HashSet<>();
 
   private int clusterDifference = 0;
 
   public ODatabaseCompare(String iDb1URL, String iDb2URL, final String userName, final String userPassword,
-      final OCommandOutputListener iListener) throws IOException {
+      final OCommandOutputListener iListener) {
     super(null, null, iListener);
 
     listener.onMessage("\nComparing two local databases:\n1) " + iDb1URL + "\n2) " + iDb2URL + "\n");
 
+    //noinspection deprecation
     databaseOne = new ODatabaseDocumentTx(iDb1URL);
+    //noinspection deprecation
     databaseOne.open(userName, userPassword);
 
+    //noinspection deprecation
     databaseTwo = new ODatabaseDocumentTx(iDb2URL);
+    //noinspection deprecation
     databaseTwo.open(userName, userPassword);
 
     // exclude automatically generated clusters
@@ -158,19 +162,13 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
       throw new ODatabaseExportException(
           "Error on comparing database '" + databaseOne.getName() + "' against '" + databaseTwo.getName() + "'", e);
     } finally {
-      makeDbCall(databaseOne, new ODbRelatedCall<Void>() {
-        @Override
-        public Void call(ODatabaseDocumentInternal database) {
-          database.close();
-          return null;
-        }
+      makeDbCall(databaseOne, (ODbRelatedCall<Void>) database -> {
+        database.close();
+        return null;
       });
-      makeDbCall(databaseTwo, new ODbRelatedCall<Void>() {
-        @Override
-        public Void call(ODatabaseDocumentInternal database) {
-          database.close();
-          return null;
-        }
+      makeDbCall(databaseTwo, (ODbRelatedCall<Void>) database -> {
+        database.close();
+        return null;
       });
 
     }
@@ -314,7 +312,7 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
     }
   }
 
-  @SuppressWarnings({ "unchecked", "rawtypes" })
+  @SuppressWarnings({ "rawtypes", "ObjectAllocationInLoop" })
   private void compareIndexes(ODocumentHelper.RIDMapper ridMapper) {
     listener.onMessage("\nStarting index comparison:");
 
@@ -326,8 +324,8 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
     final OIndexManagerAbstract indexManagerTwo = makeDbCall(databaseTwo,
         database -> database.getMetadata().getIndexManagerInternal());
 
-    final Collection<? extends OIndex<?>> indexesOne = makeDbCall(databaseOne,
-        (ODbRelatedCall<Collection<? extends OIndex<?>>>) database -> indexManagerOne.getIndexes(database));
+    final Collection<? extends OIndex> indexesOne = makeDbCall(databaseOne,
+        (ODbRelatedCall<Collection<? extends OIndex>>) indexManagerOne::getIndexes);
 
     int indexesSizeOne = makeDbCall(databaseTwo, database -> indexesOne.size());
 
@@ -346,19 +344,20 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
       ++differences;
     }
 
-    final Iterator<? extends OIndex<?>> iteratorOne = makeDbCall(databaseOne,
-        (ODbRelatedCall<Iterator<? extends OIndex<?>>>) database -> indexesOne.iterator());
+    final Iterator<? extends OIndex> iteratorOne = makeDbCall(databaseOne,
+        (ODbRelatedCall<Iterator<? extends OIndex>>) database -> indexesOne.iterator());
 
     while (makeDbCall(databaseOne, database -> iteratorOne.hasNext())) {
-      final OIndex indexOne = makeDbCall(databaseOne, (ODbRelatedCall<OIndex<?>>) database -> iteratorOne.next());
+      final OIndex indexOne = makeDbCall(databaseOne, (ODbRelatedCall<OIndex>) database -> iteratorOne.next());
 
+      @SuppressWarnings("ObjectAllocationInLoop")
       final String indexName = makeDbCall(databaseOne, database -> indexOne.getName());
       if (excludeIndexes.contains(indexName)) {
         continue;
       }
 
-      final OIndex<?> indexTwo = makeDbCall(databaseTwo,
-          (ODbRelatedCall<OIndex<?>>) database -> indexManagerTwo.getIndex(database, indexOne.getName()));
+      @SuppressWarnings("ObjectAllocationInLoop")
+      final OIndex indexTwo = makeDbCall(databaseTwo, database -> indexManagerTwo.getIndex(database, indexOne.getName()));
 
       if (indexTwo == null) {
         ok = false;
@@ -406,9 +405,10 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
         continue;
       }
 
-      final long indexOneSize = makeDbCall(databaseOne, database -> indexOne.getSize());
+      final long indexOneSize = makeDbCall(databaseOne, database -> ((OIndexInternal) indexOne).size());
 
-      final long indexTwoSize = makeDbCall(databaseTwo, database -> indexTwo.getSize());
+      @SuppressWarnings("ObjectAllocationInLoop")
+      final long indexTwoSize = makeDbCall(databaseTwo, database -> ((OIndexInternal) indexTwo).size());
 
       if (indexOneSize != indexTwoSize) {
         ok = false;
@@ -433,23 +433,17 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
           listener.onMessage("\n- ERR: Metadata for index " + indexOne.getName() + " for DB1 is not null but for DB2 is null.");
           listener.onMessage("\n");
           ++differences;
-        } else if (metadataOne != null && metadataTwo != null && !ODocumentHelper
+        } else if (metadataOne != null && !ODocumentHelper
             .hasSameContentOf(metadataOne, databaseOne, metadataTwo, databaseTwo, ridMapper)) {
           ok = false;
           listener.onMessage("\n- ERR: Metadata for index " + indexOne.getName() + " for DB1 and for DB2 are different.");
-          makeDbCall(databaseOne, new ODbRelatedCall<Object>() {
-            @Override
-            public Object call(ODatabaseDocumentInternal database) {
-              listener.onMessage("\n--- M1: " + metadataOne);
-              return null;
-            }
+          makeDbCall(databaseOne, database -> {
+            listener.onMessage("\n--- M1: " + metadataOne);
+            return null;
           });
-          makeDbCall(databaseTwo, new ODbRelatedCall<Object>() {
-            @Override
-            public Object call(ODatabaseDocumentInternal database) {
-              listener.onMessage("\n--- M2: " + metadataTwo);
-              return null;
-            }
+          makeDbCall(databaseTwo, database -> {
+            listener.onMessage("\n--- M2: " + metadataTwo);
+            return null;
           });
           listener.onMessage("\n");
           ++differences;
@@ -457,69 +451,24 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
       }
 
       if (((compareEntriesForAutomaticIndexes && !indexOne.getType().equals("DICTIONARY")) || !indexOne.isAutomatic())) {
-        final OIndexKeyCursor indexKeyCursorOne = makeDbCall(databaseOne, new ODbRelatedCall<OIndexKeyCursor>() {
-          public OIndexKeyCursor call(ODatabaseDocumentInternal database) {
-            return indexOne.keyCursor();
+
+        //noinspection resource
+        try (final Stream<Object> keyStream = makeDbCall(databaseOne, database -> ((OIndexInternal) indexOne).keyStream())) {
+          final Iterator<Object> indexKeyIteratorOne = makeDbCall(databaseOne, database -> keyStream.iterator());
+          while (makeDbCall(databaseOne, database -> indexKeyIteratorOne.hasNext())) {
+            final Object indexKey = makeDbCall(databaseOne, database -> indexKeyIteratorOne.next());
+
+            //noinspection resource
+            try (Stream<ORID> indexOneStream = makeDbCall(databaseOne, database -> indexOne.getInternal().getRids(indexKey))) {
+              //noinspection resource
+              try (Stream<ORID> indexTwoValue = makeDbCall(databaseTwo, database -> indexTwo.getInternal().getRids(indexKey))) {
+                differences = compareIndexStreams(indexKey, indexOneStream, indexTwoValue, ridMapper, listener);
+              }
+            }
+            ok = ok && differences > 0;
           }
-        });
-
-        Object key = makeDbCall(databaseOne, new ODbRelatedCall<Object>() {
-          @Override
-          public Object call(ODatabaseDocumentInternal database) {
-            return indexKeyCursorOne.next(-1);
-          }
-        });
-
-        while (key != null) {
-          final Object indexKey = key;
-
-          Object indexOneValue = makeDbCall(databaseOne, new ODbRelatedCall<Object>() {
-            public Object call(ODatabaseDocumentInternal database) {
-              return indexOne.get(indexKey);
-            }
-          });
-
-          final Object indexTwoValue = makeDbCall(databaseTwo, new ODbRelatedCall<Object>() {
-            public Object call(ODatabaseDocumentInternal database) {
-              return indexTwo.get(indexKey);
-            }
-          });
-
-          if (indexTwoValue == null) {
-            ok = false;
-            listener.onMessage("\n- ERR: Entry with key " + key + " is absent in index " + indexOne.getName() + " for DB2.");
-            ++differences;
-          } else if (indexOneValue instanceof Set && indexTwoValue instanceof Set) {
-            final Set<Object> indexOneValueSet = (Set<Object>) indexOneValue;
-            final Set<Object> indexTwoValueSet = (Set<Object>) indexTwoValue;
-
-            if (!ODocumentHelper.compareSets(databaseOne, indexOneValueSet, databaseTwo, indexTwoValueSet, ridMapper)) {
-              ok = false;
-              reportIndexDiff(indexOne, key, indexOneValue, indexTwoValue);
-            }
-          } else if (indexOneValue instanceof ORID && indexTwoValue instanceof ORID) {
-            if (ridMapper != null && ((ORID) indexOneValue).isPersistent()) {
-              OIdentifiable identifiable = ridMapper.map((ORID) indexOneValue);
-
-              if (identifiable != null)
-                indexOneValue = identifiable.getIdentity();
-            }
-            if (!indexOneValue.equals(indexTwoValue)) {
-              ok = false;
-              reportIndexDiff(indexOne, key, indexOneValue, indexTwoValue);
-            }
-          } else if (!compareIndexValues((Collection<ORID>) indexOneValue, (Collection<ORID>) indexTwoValue, ridMapper)) {
-            ok = false;
-            reportIndexDiff(indexOne, key, indexOneValue, indexTwoValue);
-          }
-
-          key = makeDbCall(databaseOne, new ODbRelatedCall<Object>() {
-            @Override
-            public Object call(ODatabaseDocumentInternal database) {
-              return indexKeyCursorOne.next(-1);
-            }
-          });
         }
+
       }
     }
 
@@ -527,7 +476,66 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
       listener.onMessage("OK");
   }
 
-  private boolean compareIndexValues(Collection<ORID> oneValue, Collection<ORID> secondValue, ODocumentHelper.RIDMapper ridMapper) {
+  private static int compareIndexStreams(final Object indexKey, final Stream<ORID> streamOne, final Stream<ORID> streamTwo,
+      final ODocumentHelper.RIDMapper ridMapper, final OCommandOutputListener listener) {
+    final Set<ORID> streamTwoSet = new HashSet<>();
+
+    final Iterator<ORID> streamOneIterator = streamOne.iterator();
+    final Iterator<ORID> streamTwoIterator = streamTwo.iterator();
+
+    int differences = 0;
+    while (streamOneIterator.hasNext()) {
+      ORID rid;
+      if (ridMapper == null) {
+        rid = streamOneIterator.next();
+      } else {
+        final ORID streamOneRid = streamOneIterator.next();
+        rid = ridMapper.map(streamOneRid);
+        if (rid == null) {
+          rid = streamOneRid;
+        }
+      }
+
+      if (!streamTwoSet.remove(rid)) {
+        if (!streamTwoIterator.hasNext()) {
+          listener.onMessage("\r\nEntry " + indexKey + ":" + rid + " is present in DB1 but absent in DB2");
+          differences++;
+        } else {
+          boolean found = false;
+          while (streamTwoIterator.hasNext()) {
+            final ORID streamRid = streamTwoIterator.next();
+            if (streamRid.equals(rid)) {
+              found = true;
+              break;
+            }
+
+            streamTwoSet.add(streamRid);
+          }
+
+          if (!found) {
+            listener.onMessage("\r\nEntry " + indexKey + ":" + rid + " is present in DB1 but absent in DB2");
+          }
+        }
+      }
+    }
+
+    while (streamTwoIterator.hasNext()) {
+      final ORID rid = streamTwoIterator.next();
+      listener.onMessage("\r\nEntry " + indexKey + ":" + rid + " is present in DB2 but absent in DB1");
+
+      differences++;
+    }
+
+    for (final ORID rid : streamTwoSet) {
+      listener.onMessage("\r\nEntry " + indexKey + ":" + rid + " is present in DB2 but absent in DB1");
+
+      differences++;
+    }
+    return differences;
+  }
+
+  private static boolean compareIndexValues(Collection<ORID> oneValue, Collection<ORID> secondValue,
+      ODocumentHelper.RIDMapper ridMapper) {
     Map<ORID, Integer> firstMap = new HashMap<>();
     Map<ORID, Integer> secondMap = new HashMap<>();
 
@@ -570,24 +578,15 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
     return firstMap.equals(secondMap);
   }
 
-  private boolean compareClusters() {
+  @SuppressWarnings("ObjectAllocationInLoop")
+  private void compareClusters() {
     listener.onMessage("\nStarting shallow comparison of clusters:");
 
     listener.onMessage("\nChecking the number of clusters...");
 
-    Collection<String> clusterNames1 = makeDbCall(databaseOne, new ODbRelatedCall<Collection<String>>() {
-      @Override
-      public Collection<String> call(ODatabaseDocumentInternal database) {
-        return database.getClusterNames();
-      }
-    });
+    Collection<String> clusterNames1 = makeDbCall(databaseOne, ODatabase::getClusterNames);
 
-    Collection<String> clusterNames2 = makeDbCall(databaseTwo, new ODbRelatedCall<Collection<String>>() {
-      @Override
-      public Collection<String> call(ODatabaseDocumentInternal database) {
-        return database.getClusterNames();
-      }
-    });
+    Collection<String> clusterNames2 = makeDbCall(databaseTwo, ODatabase::getClusterNames);
 
     if (clusterNames1.size() != clusterNames2.size() - clusterDifference) {
       listener.onMessage("ERR: cluster sizes are different: " + clusterNames1.size() + " <-> " + clusterNames2.size());
@@ -607,12 +606,7 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
       }
 
       ok = true;
-      final int cluster1Id = makeDbCall(databaseTwo, new ODbRelatedCall<Integer>() {
-        @Override
-        public Integer call(ODatabaseDocumentInternal database) {
-          return database.getClusterIdByName(clusterName);
-        }
-      });
+      final int cluster1Id = makeDbCall(databaseTwo, database -> database.getClusterIdByName(clusterName));
 
       listener.onMessage("\n- Checking cluster " + String.format("%-25s: ", "'" + clusterName + "'"));
 
@@ -622,30 +616,15 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
         ok = false;
       }
 
-      final int cluster2Id = makeDbCall(databaseOne, new ODbRelatedCall<Integer>() {
-        @Override
-        public Integer call(ODatabaseDocumentInternal database) {
-          return database.getClusterIdByName(clusterName);
-        }
-      });
+      final int cluster2Id = makeDbCall(databaseOne, database -> database.getClusterIdByName(clusterName));
       if (cluster1Id != cluster2Id) {
         listener.onMessage("ERR: cluster id is different for cluster " + clusterName + ": " + cluster2Id + " <-> " + cluster1Id);
         ++differences;
         ok = false;
       }
 
-      long countCluster1 = makeDbCall(databaseOne, new ODbRelatedCall<Long>() {
-        @Override
-        public Long call(ODatabaseDocumentInternal database) {
-          return database.getStorage().count(cluster1Id);
-        }
-      });
-      long countCluster2 = makeDbCall(databaseOne, new ODbRelatedCall<Long>() {
-        @Override
-        public Long call(ODatabaseDocumentInternal database) {
-          return database.getStorage().count(cluster2Id);
-        }
-      });
+      long countCluster1 = makeDbCall(databaseOne, database -> database.getStorage().count(cluster1Id));
+      long countCluster2 = makeDbCall(databaseOne, database -> database.getStorage().count(cluster2Id));
 
       if (countCluster1 != countCluster2) {
         listener.onMessage(
@@ -660,18 +639,13 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
     }
 
     listener.onMessage("\n\nShallow analysis done.");
-    return true;
   }
 
-  private boolean compareRecords(ODocumentHelper.RIDMapper ridMapper) {
+  @SuppressWarnings("ObjectAllocationInLoop")
+  private void compareRecords(ODocumentHelper.RIDMapper ridMapper) {
     listener.onMessage("\nStarting deep comparison record by record. This may take a few minutes. Wait please...");
 
-    Collection<String> clusterNames1 = makeDbCall(databaseOne, new ODbRelatedCall<Collection<String>>() {
-      @Override
-      public Collection<String> call(ODatabaseDocumentInternal database) {
-        return database.getClusterNames();
-      }
-    });
+    Collection<String> clusterNames1 = makeDbCall(databaseOne, ODatabase::getClusterNames);
 
     for (final String clusterName : clusterNames1) {
       // CHECK IF THE CLUSTER IS INCLUDED
@@ -683,34 +657,22 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
           continue;
       }
 
-      final int clusterId1 = makeDbCall(databaseOne, new ODbRelatedCall<Integer>() {
-        @Override
-        public Integer call(ODatabaseDocumentInternal database) {
-          return database.getClusterIdByName(clusterName);
-        }
-      });
+      final int clusterId1 = makeDbCall(databaseOne, database -> database.getClusterIdByName(clusterName));
 
-      final long[] db1Range = makeDbCall(databaseOne, new ODbRelatedCall<long[]>() {
-        @Override
-        public long[] call(ODatabaseDocumentInternal database) {
-          return database.getStorage().getClusterDataRange(clusterId1);
-        }
-      });
-      final long[] db2Range = makeDbCall(databaseTwo, new ODbRelatedCall<long[]>() {
-        @Override
-        public long[] call(ODatabaseDocumentInternal database) {
-          return database.getStorage().getClusterDataRange(clusterId1);
-        }
-      });
+      final long[] db1Range = makeDbCall(databaseOne, database -> database.getStorage().getClusterDataRange(clusterId1));
+      final long[] db2Range = makeDbCall(databaseTwo, database -> database.getStorage().getClusterDataRange(clusterId1));
 
       final long db1Max = db1Range[1];
       final long db2Max = db2Range[1];
 
       databaseOne.activateOnCurrentThread();
+      @SuppressWarnings("ObjectAllocationInLoop")
       final ODocument doc1 = new ODocument();
       databaseTwo.activateOnCurrentThread();
+      @SuppressWarnings("ObjectAllocationInLoop")
       final ODocument doc2 = new ODocument();
 
+      @SuppressWarnings("ObjectAllocationInLoop")
       final ORecordId rid = new ORecordId(clusterId1);
 
       // TODO why this maximums can be different?
@@ -724,37 +686,13 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
       else
         selectedDatabase = databaseTwo;
 
-      OPhysicalPosition[] physicalPositions = makeDbCall(selectedDatabase, new ODbRelatedCall<OPhysicalPosition[]>() {
-        @Override
-        public OPhysicalPosition[] call(ODatabaseDocumentInternal database) {
-          return database.getStorage().ceilingPhysicalPositions(clusterId1, new OPhysicalPosition(0));
-        }
-      });
+      OPhysicalPosition[] physicalPositions = makeDbCall(selectedDatabase,
+          database -> database.getStorage().ceilingPhysicalPositions(clusterId1, new OPhysicalPosition(0)));
 
-      OStorageConfiguration configuration1 = makeDbCall(databaseOne, new ODbRelatedCall<OStorageConfiguration>() {
-        @Override
-        public OStorageConfiguration call(ODatabaseDocumentInternal database) {
-          return database.getStorage().getConfiguration();
-        }
-      });
-      OStorageConfiguration configuration2 = makeDbCall(databaseTwo, new ODbRelatedCall<OStorageConfiguration>() {
-        @Override
-        public OStorageConfiguration call(ODatabaseDocumentInternal database) {
-          return database.getStorage().getConfiguration();
-        }
-      });
-      String storageType1 = makeDbCall(databaseOne, new ODbRelatedCall<String>() {
-        @Override
-        public String call(ODatabaseDocumentInternal database) {
-          return database.getStorage().getType();
-        }
-      });
-      String storageType2 = makeDbCall(databaseTwo, new ODbRelatedCall<String>() {
-        @Override
-        public String call(ODatabaseDocumentInternal database) {
-          return database.getStorage().getType();
-        }
-      });
+      OStorageConfiguration configuration1 = makeDbCall(databaseOne, database -> database.getStorage().getConfiguration());
+      OStorageConfiguration configuration2 = makeDbCall(databaseTwo, database -> database.getStorage().getConfiguration());
+      String storageType1 = makeDbCall(databaseOne, database -> database.getStorage().getType());
+      String storageType2 = makeDbCall(databaseTwo, database -> database.getStorage().getType());
 
       long recordsCounter = 0;
       while (physicalPositions.length > 0) {
@@ -765,9 +703,11 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
             final long position = physicalPosition.clusterPosition;
             rid.setClusterPosition(position);
 
+            // noinspection ObjectAllocationInLoop
             if (rid.equals(new ORecordId(configuration1.getIndexMgrRecordId())) && rid
                 .equals(new ORecordId(configuration2.getIndexMgrRecordId())))
               continue;
+            // noinspection ObjectAllocationInLoop
             if (rid.equals(new ORecordId(configuration1.getSchemaRecordId())) && rid
                 .equals(new ORecordId(configuration2.getSchemaRecordId())))
               continue;
@@ -786,30 +726,23 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
               if (newRid == null)
                 rid2 = rid;
               else
+                //noinspection ObjectAllocationInLoop
                 rid2 = new ORecordId(newRid);
             }
 
-            final ORawBuffer buffer1 = makeDbCall(databaseOne, new ODbRelatedCall<ORawBuffer>() {
-              @Override
-              public ORawBuffer call(ODatabaseDocumentInternal database) {
-                return database.getStorage().readRecord(rid, null, true, false, null).getResult();
-              }
-            });
-            final ORawBuffer buffer2 = makeDbCall(databaseTwo, new ODbRelatedCall<ORawBuffer>() {
-              @Override
-              public ORawBuffer call(ODatabaseDocumentInternal database) {
-                return database.getStorage().readRecord(rid2, null, true, false, null).getResult();
-              }
-            });
+            final ORawBuffer buffer1 = makeDbCall(databaseOne,
+                database -> database.getStorage().readRecord(rid, null, true, false, null).getResult());
+            final ORawBuffer buffer2 = makeDbCall(databaseTwo,
+                database -> database.getStorage().readRecord(rid2, null, true, false, null).getResult());
 
-            if (buffer1 == null && buffer2 == null)
+            //noinspection StatementWithEmptyBody
+            if (buffer1 == null && buffer2 == null) {
               // BOTH RECORD NULL, OK
-              continue;
-            else if (buffer1 == null && buffer2 != null) {
+            } else if (buffer1 == null) {
               // REC1 NULL
               listener.onMessage("\n- ERR: RID=" + clusterId1 + ":" + position + " is null in DB1");
               ++differences;
-            } else if (buffer1 != null && buffer2 == null) {
+            } else if (buffer2 == null) {
               // REC2 NULL
               listener.onMessage("\n- ERR: RID=" + clusterId1 + ":" + position + " is null in DB2");
               ++differences;
@@ -821,14 +754,15 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
                 ++differences;
               }
 
+              //noinspection StatementWithEmptyBody
               if (buffer1.buffer == null && buffer2.buffer == null) {
                 // Both null so both equals
-              } else if (buffer1.buffer == null && buffer2.buffer != null) {
+              } else if (buffer1.buffer == null) {
                 listener.onMessage(
                     "\n- ERR: RID=" + clusterId1 + ":" + position + " content is different: null <-> " + buffer2.buffer.length);
                 ++differences;
 
-              } else if (buffer1.buffer != null && buffer2.buffer == null) {
+              } else if (buffer2.buffer == null) {
                 listener.onMessage("\n- ERR: RID=" + clusterId1 + ":" + position + " content is different: " + buffer1.buffer.length
                     + " <-> null");
                 ++differences;
@@ -837,42 +771,36 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
                 if (buffer1.recordType == ODocument.RECORD_TYPE) {
                   // DOCUMENT: TRY TO INSTANTIATE AND COMPARE
 
-                  makeDbCall(databaseOne, new ODocumentHelper.ODbRelatedCall<Object>() {
-                    public Object call(ODatabaseDocumentInternal database) {
-                      doc1.reset();
-                      doc1.fromStream(buffer1.buffer);
-                      return null;
-                    }
+                  makeDbCall(databaseOne, database -> {
+                    doc1.reset();
+                    doc1.fromStream(buffer1.buffer);
+                    return null;
                   });
 
-                  makeDbCall(databaseTwo, new ODocumentHelper.ODbRelatedCall<Object>() {
-                    public Object call(ODatabaseDocumentInternal database) {
-                      doc2.reset();
-                      doc2.fromStream(buffer2.buffer);
-                      return null;
-                    }
+                  makeDbCall(databaseTwo, database -> {
+                    doc2.reset();
+                    doc2.fromStream(buffer2.buffer);
+                    return null;
                   });
 
                   if (rid.toString().equals(configuration1.getSchemaRecordId()) && rid.toString()
                       .equals(configuration2.getSchemaRecordId())) {
-                    makeDbCall(databaseOne, new ODocumentHelper.ODbRelatedCall<java.lang.Object>() {
-                      public Object call(ODatabaseDocumentInternal database) {
-                        convertSchemaDoc(doc1);
-                        return null;
-                      }
+                    makeDbCall(databaseOne, database -> {
+                      convertSchemaDoc(doc1);
+                      return null;
                     });
 
-                    makeDbCall(databaseTwo, new ODocumentHelper.ODbRelatedCall<java.lang.Object>() {
-                      public Object call(ODatabaseDocumentInternal database) {
-                        convertSchemaDoc(doc2);
-                        return null;
-                      }
+                    makeDbCall(databaseTwo, database -> {
+                      convertSchemaDoc(doc2);
+                      return null;
                     });
                   }
 
                   if (!ODocumentHelper.hasSameContentOf(doc1, databaseOne, doc2, databaseTwo, ridMapper)) {
                     listener.onMessage("\n- ERR: RID=" + clusterId1 + ":" + position + " document content is different");
+                    //noinspection ObjectAllocationInLoop
                     listener.onMessage("\n--- REC1: " + new String(buffer1.buffer));
+                    //noinspection ObjectAllocationInLoop
                     listener.onMessage("\n--- REC2: " + new String(buffer2.buffer));
                     listener.onMessage("\n");
                     ++differences;
@@ -880,7 +808,9 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
                 } else {
                   if (buffer1.buffer.length != buffer2.buffer.length) {
                     // CHECK IF THE TRIMMED SIZE IS THE SAME
+                    @SuppressWarnings("ObjectAllocationInLoop")
                     final String rec1 = new String(buffer1.buffer).trim();
+                    @SuppressWarnings("ObjectAllocationInLoop")
                     final String rec2 = new String(buffer2.buffer).trim();
 
                     if (rec1.length() != rec2.length()) {
@@ -920,12 +850,8 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
           }
         }
         final OPhysicalPosition[] curPosition = physicalPositions;
-        physicalPositions = makeDbCall(selectedDatabase, new ODbRelatedCall<OPhysicalPosition[]>() {
-          @Override
-          public OPhysicalPosition[] call(ODatabaseDocumentInternal database) {
-            return database.getStorage().higherPhysicalPositions(clusterId1, curPosition[curPosition.length - 1]);
-          }
-        });
+        physicalPositions = makeDbCall(selectedDatabase,
+            database -> database.getStorage().higherPhysicalPositions(clusterId1, curPosition[curPosition.length - 1]));
         if (recordsCounter % 10000 == 0)
           listener.onMessage("\n" + recordsCounter + " records were processed for cluster " + clusterName + " ...");
       }
@@ -934,7 +860,6 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
           "\nCluster comparison was finished, " + recordsCounter + " records were processed for cluster " + clusterName + " ...");
     }
 
-    return true;
   }
 
   public void setCompareIndexMetadata(boolean compareIndexMetadata) {
@@ -953,7 +878,7 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
     this.autoDetectExportImportMap = autoDetectExportImportMap;
   }
 
-  private void convertSchemaDoc(final ODocument document) {
+  private static void convertSchemaDoc(final ODocument document) {
     if (document.field("classes") != null) {
       document.setFieldType("classes", OType.EMBEDDEDSET);
       for (ODocument classDoc : document.<Set<ODocument>>field("classes")) {
@@ -962,18 +887,10 @@ public class ODatabaseCompare extends ODatabaseImpExpAbstract {
     }
   }
 
-  private void reportIndexDiff(OIndex<?> indexOne, Object key, final Object indexOneValue, final Object indexTwoValue) {
+  private void reportIndexDiff(OIndex indexOne, Object key, final Object indexOneValue, final Object indexTwoValue) {
     listener.onMessage("\n- ERR: Entry values for key '" + key + "' are different for index " + indexOne.getName());
-    listener.onMessage("\n--- DB1: " + makeDbCall(databaseOne, new ODbRelatedCall<String>() {
-      public String call(ODatabaseDocumentInternal database) {
-        return indexOneValue.toString();
-      }
-    }));
-    listener.onMessage("\n--- DB2: " + makeDbCall(databaseOne, new ODbRelatedCall<String>() {
-      public String call(ODatabaseDocumentInternal database) {
-        return indexTwoValue.toString();
-      }
-    }));
+    listener.onMessage("\n--- DB1: " + makeDbCall(databaseOne, database -> indexOneValue.toString()));
+    listener.onMessage("\n--- DB2: " + makeDbCall(databaseOne, database -> indexTwoValue.toString()));
     listener.onMessage("\n");
     ++differences;
   }

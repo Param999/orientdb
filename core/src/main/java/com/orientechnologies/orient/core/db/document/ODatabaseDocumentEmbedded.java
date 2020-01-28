@@ -43,8 +43,8 @@ import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
 import com.orientechnologies.orient.core.index.OClassIndexManager;
 import com.orientechnologies.orient.core.metadata.OMetadataDefault;
-import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.metadata.function.OFunctionLibraryImpl;
+import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.metadata.schema.OImmutableClass;
 import com.orientechnologies.orient.core.metadata.schema.OImmutableSchema;
 import com.orientechnologies.orient.core.metadata.schema.OView;
@@ -82,6 +82,7 @@ import java.util.*;
 import java.util.Map.Entry;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * Created by tglman on 27/06/16.
@@ -89,7 +90,7 @@ import java.util.concurrent.TimeUnit;
 public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract implements OQueryLifecycleListener {
 
   private OrientDBConfig config;
-  private OStorage       storage;
+  private OStorage storage;
 
   public ODatabaseDocumentEmbedded(final OStorage storage) {
     activateOnCurrentThread();
@@ -209,7 +210,6 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
    * Opens a database using an authentication token received as an argument.
    *
    * @param iToken Authentication token
-   *
    * @return The Database instance itself giving a "fluent interface". Useful to call multiple methods in chain.
    */
   @Deprecated
@@ -590,6 +590,9 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
   public OResultSet execute(String language, String script, Object... args) {
     checkOpenness();
     checkIfActive();
+    if (!"sql".equalsIgnoreCase(language)) {
+      checkSecurity(ORule.ResourceGeneric.COMMAND, ORole.PERMISSION_EXECUTE, language);
+    }
 
     OScriptExecutor executor = OCommandManager.instance().getScriptExecutor(language);
 
@@ -610,6 +613,10 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
   public OResultSet execute(String language, String script, Map<String, ?> args) {
     checkOpenness();
     checkIfActive();
+    if (!"sql".equalsIgnoreCase(language)) {
+      checkSecurity(ORule.ResourceGeneric.COMMAND, ORole.PERMISSION_EXECUTE, language);
+    }
+
 
     OScriptExecutor executor = OCommandManager.instance().getScriptExecutor(language);
     OResultSet original;
@@ -705,7 +712,7 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
    * @Internal
    */
   public void executeDeleteRecord(OIdentifiable identifiable, final int iVersion, final boolean iRequired,
-      final OPERATION_MODE iMode, boolean prohibitTombstones) {
+                                  final OPERATION_MODE iMode, boolean prohibitTombstones) {
     checkOpenness();
     checkIfActive();
 
@@ -713,7 +720,7 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
 
     if (rid == null)
       throw new ODatabaseException(
-          "Cannot delete record because it has no identity. Probably was created from scratch or contains projections of fields rather than a full record");
+              "Cannot delete record because it has no identity. Probably was created from scratch or contains projections of fields rather than a full record");
 
     if (!rid.isValid())
       return;
@@ -888,9 +895,7 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
    * OConcurrentModificationException} exception is thrown.
    *
    * @param record record to delete
-   *
    * @return The Database instance itself giving a "fluent interface". Useful to call multiple methods in chain.
-   *
    * @see #setMVCC(boolean), {@link #isMVCC()}
    */
   public ODatabaseDocumentAbstract delete(ORecord record) {
@@ -918,7 +923,7 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
     } catch (Exception e) {
       if (record instanceof ODocument)
         throw OException.wrapException(new ODatabaseException(
-            "Error on deleting record " + record.getIdentity() + " of class '" + ((ODocument) record).getClassName() + "'"), e);
+                "Error on deleting record " + record.getIdentity() + " of class '" + ((ODocument) record).getClassName() + "'"), e);
       else
         throw OException.wrapException(new ODatabaseException("Error on deleting record " + record.getIdentity()), e);
     }
@@ -957,7 +962,7 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
           this.getSharedContext().getFunctionLibrary().createdFunction(doc);
           Orient.instance().getScriptManager().close(this.getName());
         }
-        if (clazz.isOuser() || clazz.isOrole() || clazz.isSubClassOf(OSecurityPolicy.class.getName())) {
+        if (clazz.isOuser() || clazz.isOrole() || clazz.isSubClassOf(OSecurityPolicy.class.getSimpleName())) {
           sharedContext.getSecurity().incrementVersion(this);
         }
         if (clazz.isSequence()) {
@@ -989,7 +994,7 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
           this.getSharedContext().getFunctionLibrary().updatedFunction(doc);
           Orient.instance().getScriptManager().close(this.getName());
         }
-        if (clazz.isOuser() || clazz.isOrole()) {
+        if (clazz.isOuser() || clazz.isOrole() || clazz.isSubClassOf(OSecurityPolicy.class.getSimpleName())) {
           sharedContext.getSecurity().incrementVersion(this);
         }
         if (clazz.isSequence()) {
@@ -1018,7 +1023,7 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
           this.getSharedContext().getFunctionLibrary().droppedFunction(doc);
           Orient.instance().getScriptManager().close(this.getName());
         }
-        if (clazz.isOuser() || clazz.isOrole()) {
+        if (clazz.isOuser() || clazz.isOrole() || clazz.isSubClassOf(OSecurityPolicy.class.getSimpleName())) {
           sharedContext.getSecurity().incrementVersion(this);
         }
         if (clazz.isSequence()) {
@@ -1071,6 +1076,12 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
           }
         }
 
+        try {
+          checkSecurity(ORule.ResourceGeneric.CLASS, ORole.PERMISSION_READ, clazz.getName());
+        } catch (OSecurityException e) {
+          return true;
+        }
+
         if (!getSharedContext().getSecurity().canRead(this, doc)) {
           return true;
         }
@@ -1098,7 +1109,7 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
 
   @Override
   public ORecord saveAll(ORecord iRecord, String iClusterName, OPERATION_MODE iMode, boolean iForceCreate,
-      ORecordCallback<? extends Number> iRecordCreatedCallback, ORecordCallback<Integer> iRecordUpdatedCallback) {
+                         ORecordCallback<? extends Number> iRecordCreatedCallback, ORecordCallback<Integer> iRecordUpdatedCallback) {
 
     ORecord toRet = null;
     ODirtyManager dirtyManager = ORecordInternal.getDirtyManager(iRecord);
@@ -1182,8 +1193,8 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
    * @Internal
    */
   public <RET extends ORecord> RET executeReadRecord(final ORecordId rid, ORecord iRecord, final int recordVersion,
-      final String fetchPlan, final boolean ignoreCache, final boolean iUpdateCache, final boolean loadTombstones,
-      final OStorage.LOCKING_STRATEGY lockingStrategy, RecordReader recordReader) {
+                                                     final String fetchPlan, final boolean ignoreCache, final boolean iUpdateCache, final boolean loadTombstones,
+                                                     final OStorage.LOCKING_STRATEGY lockingStrategy, RecordReader recordReader) {
     checkOpenness();
     checkIfActive();
 
@@ -1229,12 +1240,12 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
 
         if (lockingStrategy == OStorage.LOCKING_STRATEGY.KEEP_SHARED_LOCK) {
           OLogManager.instance()
-              .warn(this, "You use deprecated record locking strategy: %s it may lead to deadlocks " + lockingStrategy);
+                  .warn(this, "You use deprecated record locking strategy: %s it may lead to deadlocks " + lockingStrategy);
           record.lock(false);
 
         } else if (lockingStrategy == OStorage.LOCKING_STRATEGY.KEEP_EXCLUSIVE_LOCK) {
           OLogManager.instance()
-              .warn(this, "You use deprecated record locking strategy: %s it may lead to deadlocks " + lockingStrategy);
+                  .warn(this, "You use deprecated record locking strategy: %s it may lead to deadlocks " + lockingStrategy);
           record.lock(true);
         }
 
@@ -1294,8 +1305,8 @@ public class ODatabaseDocumentEmbedded extends ODatabaseDocumentAbstract impleme
         throw OException.wrapException(new ODatabaseException("Error on retrieving record using temporary RID: " + rid), t);
       else
         throw OException.wrapException(new ODatabaseException(
-            "Error on retrieving record " + rid + " (cluster: " + getStorage().getPhysicalClusterNameById(rid.getClusterId())
-                + ")"), t);
+                "Error on retrieving record " + rid + " (cluster: " + getStorage().getPhysicalClusterNameById(rid.getClusterId())
+                        + ")"), t);
     } finally {
       ORecordSerializationContext.pullContext();
       getMetadata().clearThreadLocalSchemaSnapshot();

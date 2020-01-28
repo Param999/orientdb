@@ -17,8 +17,6 @@ import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedSt
 import com.orientechnologies.orient.core.storage.impl.local.paginated.atomicoperations.OAtomicOperation;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.atomicoperations.OAtomicOperationsManager;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.base.ODurableComponent;
-import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.co.localhashtable.OLocalHashTablePutCO;
-import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.co.localhashtable.OLocalHashTableRemoveCO;
 import com.orientechnologies.orient.core.storage.index.hashindex.local.OHashFunction;
 import com.orientechnologies.orient.core.storage.index.hashindex.local.OHashTable;
 
@@ -95,9 +93,8 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
 
   private KeyHashCodeComparator<K> comparator;
 
-  private       boolean nullKeyIsSupported;
-  private       long    nullBucketFileId = -1;
-  private final String  nullBucketFileExtension;
+  private       long   nullBucketFileId = -1;
+  private final String nullBucketFileExtension;
 
   private long fileStateId;
   private long fileId;
@@ -106,13 +103,10 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
 
   private OHashTableDirectory directory;
 
-  private final int indexId;
-
-  public OLocalHashTableV3(int indexId, final String name, final String metadataConfigurationFileExtension,
-      final String treeStateFileExtension, final String bucketFileExtension, final String nullBucketFileExtension,
+  public OLocalHashTableV3(final String name, final String metadataConfigurationFileExtension, final String treeStateFileExtension,
+      final String bucketFileExtension, final String nullBucketFileExtension,
       final OAbstractPaginatedStorage abstractPaginatedStorage) {
     super(abstractPaginatedStorage, name, bucketFileExtension, name + bucketFileExtension);
-    this.indexId = indexId;
 
     this.metadataConfigurationFileExtension = metadataConfigurationFileExtension;
     this.treeStateFileExtension = treeStateFileExtension;
@@ -135,8 +129,6 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
         } else {
           this.keyTypes = null;
         }
-
-        this.nullKeyIsSupported = nullKeyIsSupported;
 
         this.directory = new OHashTableDirectory(treeStateFileExtension, getName(), getFullName(), storage);
 
@@ -162,9 +154,7 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
 
         initHashTreeState(atomicOperation);
 
-        if (nullKeyIsSupported) {
-          nullBucketFileId = addFile(atomicOperation, getName() + nullBucketFileExtension);
-        }
+        nullBucketFileId = addFile(atomicOperation, getName() + nullBucketFileExtension);
       } finally {
         releaseExclusiveLock();
       }
@@ -183,7 +173,6 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
       try {
         final OAtomicOperation atomicOperation = OAtomicOperationsManager.getCurrentOperation();
 
-        checkNullSupport(key);
         if (key == null) {
           if (getFilledUpTo(atomicOperation, nullBucketFileId) == 0) {
             return null;
@@ -200,6 +189,7 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
 
           return result;
         } else {
+          //noinspection RedundantCast
           key = keySerializer.preprocess(key, (Object[]) keyTypes);
 
           final long hashCode = keyHashFunction.hashCode(key);
@@ -243,7 +233,7 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
   public boolean isNullKeyIsSupported() {
     acquireSharedLock();
     try {
-      return nullKeyIsSupported;
+      return true;
     } finally {
       releaseSharedLock();
     }
@@ -266,10 +256,10 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
     try {
       acquireExclusiveLock();
       try {
-        checkNullSupport(key);
 
         int sizeDiff = 0;
         if (key != null) {
+          //noinspection RedundantCast
           key = keySerializer.preprocess(key, (Object[]) keyTypes);
 
           final long hashCode = keyHashFunction.hashCode(key);
@@ -312,12 +302,6 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
             changeSize(sizeDiff, atomicOperation);
           }
 
-          if (removed != null) {
-            atomicOperation.addComponentOperation(
-                new OLocalHashTableRemoveCO(indexId, null, keySerializer.getId(), keySerializer.serializeNativeAsWhole(key),
-                    valueSerializer.serializeNativeAsWhole(removed), valueSerializer.getId()));
-          }
-
           return removed;
         } else {
           if (getFilledUpTo(atomicOperation, nullBucketFileId) == 0) {
@@ -344,11 +328,6 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
           }
 
           changeSize(sizeDiff, atomicOperation);
-
-          if (removed != null) {
-            atomicOperation.addComponentOperation(new OLocalHashTableRemoveCO(indexId, null, keySerializer.getId(), null,
-                valueSerializer.serializeNativeAsWhole(removed), valueSerializer.getId()));
-          }
 
           return removed;
         }
@@ -390,6 +369,7 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
       try {
         final OAtomicOperation atomicOperation = OAtomicOperationsManager.getCurrentOperation();
 
+        //noinspection RedundantCast
         key = keySerializer.preprocess(key, (Object[]) keyTypes);
 
         final long hashCode = keyHashFunction.hashCode(key);
@@ -465,8 +445,6 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
         this.keyTypes = null;
       }
 
-      this.nullKeyIsSupported = nullKeyIsSupported;
-
       final OAtomicOperation atomicOperation = OAtomicOperationsManager.getCurrentOperation();
 
       fileStateId = openFile(atomicOperation, name + metadataConfigurationFileExtension);
@@ -484,9 +462,7 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
         releasePageFromRead(atomicOperation, hashStateEntry);
       }
 
-      if (nullKeyIsSupported) {
-        nullBucketFileId = openFile(atomicOperation, name + nullBucketFileExtension);
-      }
+      nullBucketFileId = openFile(atomicOperation, name + nullBucketFileExtension);
 
       fileId = openFile(atomicOperation, getFullName());
     } catch (final IOException e) {
@@ -624,6 +600,7 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
       try {
         final OAtomicOperation atomicOperation = OAtomicOperationsManager.getCurrentOperation();
 
+        //noinspection RedundantCast
         key = keySerializer.preprocess(key, (Object[]) keyTypes);
 
         final long hashCode = keyHashFunction.hashCode(key);
@@ -783,6 +760,7 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
       try {
         final OAtomicOperation atomicOperation = OAtomicOperationsManager.getCurrentOperation();
 
+        //noinspection RedundantCast
         key = keySerializer.preprocess(key, (Object[]) keyTypes);
 
         final long hashCode = keyHashFunction.hashCode(key);
@@ -847,6 +825,7 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
       acquireSharedLock();
       try {
         final OAtomicOperation atomicOperation = OAtomicOperationsManager.getCurrentOperation();
+        //noinspection RedundantCast
         key = keySerializer.preprocess(key, (Object[]) keyTypes);
 
         final long hashCode = keyHashFunction.hashCode(key);
@@ -913,6 +892,7 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
     int nodeLocalDepth = bucketPath.nodeLocalDepth;
     while (offset > 0) {
       offset -= nodeLocalDepth;
+      //noinspection IfStatementMissingBreakInLoop
       if (offset > 0) {
         currentBucket = bucketPath.parent;
         nodeLocalDepth = currentBucket.nodeLocalDepth;
@@ -1057,9 +1037,7 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
         deleteFile(atomicOperation, fileStateId);
         deleteFile(atomicOperation, fileId);
 
-        if (nullKeyIsSupported) {
-          deleteFile(atomicOperation, nullBucketFileId);
-        }
+        deleteFile(atomicOperation, nullBucketFileId);
       } finally {
         releaseExclusiveLock();
       }
@@ -1106,9 +1084,7 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
 
       directory.flush();
 
-      if (nullKeyIsSupported) {
-        writeCache.flush(nullBucketFileId);
-      }
+      writeCache.flush(nullBucketFileId);
     } finally {
       releaseExclusiveLock();
     }
@@ -1125,9 +1101,8 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
     try {
       acquireExclusiveLock();
       try {
-        checkNullSupport(key);
-
         if (key != null) {
+          @SuppressWarnings("RedundantCast")
           final int keySize = keySerializer.getObjectSize(key, (Object[]) keyTypes);
           if (keySize > MAX_KEY_SIZE) {
             throw new OTooBigIndexKeyException(
@@ -1136,6 +1111,7 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
           }
         }
 
+        //noinspection RedundantCast
         key = keySerializer.preprocess(key, (Object[]) keyTypes);
 
         return doPut(key, value, validator, atomicOperation);
@@ -1193,11 +1169,6 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
 
       changeSize(sizeDiff, atomicOperation);
 
-      atomicOperation.addComponentOperation(
-          new OLocalHashTablePutCO(indexId, null, keySerializer.getId(), null, valueSerializer.getId(),
-              valueSerializer.serializeNativeAsWhole(value),
-              oldValue != null ? valueSerializer.serializeNativeAsWhole(oldValue) : null));
-
       return true;
     } else {
       final long hashCode = keyHashFunction.hashCode(key);
@@ -1235,12 +1206,6 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
 
           if (updateResult == 1) {
             changeSize(sizeDiff, atomicOperation);
-
-            atomicOperation.addComponentOperation(new OLocalHashTablePutCO(indexId, null, keySerializer.getId(),
-                keySerializer.serializeNativeAsWhole(key, (Object[]) keyTypes), valueSerializer.getId(),
-                valueSerializer.serializeNativeAsWhole(value),
-                oldValue != null ? valueSerializer.serializeNativeAsWhole(oldValue) : null));
-
             return true;
           }
 
@@ -1254,12 +1219,6 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
           sizeDiff++;
 
           changeSize(sizeDiff, atomicOperation);
-
-          atomicOperation.addComponentOperation(new OLocalHashTablePutCO(indexId, null, keySerializer.getId(),
-              keySerializer.serializeNativeAsWhole(key, (Object[]) keyTypes), valueSerializer.getId(),
-              valueSerializer.serializeNativeAsWhole(value),
-              oldValue != null ? valueSerializer.serializeNativeAsWhole(oldValue) : null));
-
           return true;
         }
 
@@ -1327,12 +1286,6 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
       return true;
     }
 
-  }
-
-  private void checkNullSupport(final K key) {
-    if (key == null && !nullKeyIsSupported) {
-      throw new OLocalHashTableV3Exception("Null keys are not supported.", this);
-    }
   }
 
   private void updateNodesAfterSplit(final BucketPath bucketPath, final int nodeIndex, final long[] newNode,
@@ -1509,6 +1462,7 @@ public class OLocalHashTableV3<K, V> extends ODurableComponent implements OHashT
     int nodeLocalDepth = bucketPath.nodeLocalDepth;
     while (offset > 0) {
       offset -= nodeLocalDepth;
+      //noinspection IfStatementMissingBreakInLoop
       if (offset > 0) {
         currentNode = bucketPath.parent;
         nodeLocalDepth = currentNode.nodeLocalDepth;

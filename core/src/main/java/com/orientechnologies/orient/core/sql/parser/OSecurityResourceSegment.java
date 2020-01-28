@@ -19,14 +19,6 @@ public class OSecurityResourceSegment extends SimpleNode {
     super(p, id);
   }
 
-
-  /**
-   * Accept the visitor.
-   **/
-  public Object jjtAccept(OrientSqlVisitor visitor, Object data) {
-    return visitor.visit(this, data);
-  }
-
   public boolean isStar() {
     return star;
   }
@@ -51,6 +43,15 @@ public class OSecurityResourceSegment extends SimpleNode {
       builder.append(".");
       next.toString(params, builder);
     }
+  }
+
+  @Override
+  public OSecurityResourceSegment copy() {
+    OSecurityResourceSegment result = new OSecurityResourceSegment(-1);
+    result.star = this.star;
+    result.identifier = this.identifier == null ? null : this.identifier.copy();
+    result.next = this.next == null ? null : this.next.copy();
+    return result;
   }
 }
 /* JavaCC - OriginalChecksum=f51870252b37ccb5ff69ec19ed9687ab (do not edit this line) */

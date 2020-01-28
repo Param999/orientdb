@@ -47,7 +47,7 @@ public class IndexTxAwareMultiValueGetTest extends DocumentDBBaseTest {
     }
 
     database.begin();
-    final OIndex<?> index = database.getMetadata().getIndexManagerInternal().getIndex(database, INDEX_NAME);
+    final OIndex index = database.getMetadata().getIndexManagerInternal().getIndex(database, INDEX_NAME);
     Assert.assertTrue(index instanceof OIndexTxAwareMultiValue);
 
     new ODocument(CLASS_NAME).field(FIELD_NAME, 1).save();
@@ -82,7 +82,7 @@ public class IndexTxAwareMultiValueGetTest extends DocumentDBBaseTest {
     }
 
     database.begin();
-    final OIndex<?> index = database.getMetadata().getIndexManagerInternal().getIndex(database, INDEX_NAME);
+    final OIndex index = database.getMetadata().getIndexManagerInternal().getIndex(database, INDEX_NAME);
     Assert.assertTrue(index instanceof OIndexTxAwareMultiValue);
 
     final ODocument docOne = new ODocument(CLASS_NAME).field(FIELD_NAME, 1).save();
@@ -102,7 +102,7 @@ public class IndexTxAwareMultiValueGetTest extends DocumentDBBaseTest {
     docTwo.delete();
 
     Assert.assertNotNull(database.getTransaction().getIndexChanges(INDEX_NAME));
-    Assert.assertNull(((OIndexTxAwareMultiValue) index).get(1));
+    Assert.assertTrue(((OIndexTxAwareMultiValue) index).get(1).isEmpty());
     Assert.assertEquals(((OIndexTxAwareMultiValue) index).get(2).size(), 1);
 
     database.rollback();
@@ -119,7 +119,7 @@ public class IndexTxAwareMultiValueGetTest extends DocumentDBBaseTest {
     }
 
     database.begin();
-    final OIndex<?> index = database.getMetadata().getIndexManagerInternal().getIndex(database, INDEX_NAME);
+    final OIndex index = database.getMetadata().getIndexManagerInternal().getIndex(database, INDEX_NAME);
     Assert.assertTrue(index instanceof OIndexTxAwareMultiValue);
 
     final ODocument document = new ODocument(CLASS_NAME).field(FIELD_NAME, 1).save();
@@ -150,13 +150,13 @@ public class IndexTxAwareMultiValueGetTest extends DocumentDBBaseTest {
 
   @Test
   public void testMultiPut() {
-    if (((ODatabaseInternal) database).getStorage().isRemote()) {
+    if (database.getStorage().isRemote()) {
       throw new SkipException("Test is enabled only for embedded database");
     }
 
     database.begin();
 
-    final OIndex<?> index = database.getMetadata().getIndexManagerInternal().getIndex(database, INDEX_NAME);
+    final OIndex index = database.getMetadata().getIndexManagerInternal().getIndex(database, INDEX_NAME);
     Assert.assertTrue(index instanceof OIndexTxAwareMultiValue);
 
     final ODocument document = new ODocument(CLASS_NAME).field(FIELD_NAME, 1).save();
@@ -181,7 +181,7 @@ public class IndexTxAwareMultiValueGetTest extends DocumentDBBaseTest {
 
     database.begin();
 
-    final OIndex<?> index = database.getMetadata().getIndexManagerInternal().getIndex(database, INDEX_NAME);
+    final OIndex index = database.getMetadata().getIndexManagerInternal().getIndex(database, INDEX_NAME);
     Assert.assertTrue(index instanceof OIndexTxAwareMultiValue);
 
     new ODocument(CLASS_NAME).field(FIELD_NAME, 1).save();
@@ -205,7 +205,7 @@ public class IndexTxAwareMultiValueGetTest extends DocumentDBBaseTest {
 
     database.begin();
 
-    final OIndex<?> index = database.getMetadata().getIndexManagerInternal().getIndex(database, INDEX_NAME);
+    final OIndex index = database.getMetadata().getIndexManagerInternal().getIndex(database, INDEX_NAME);
     Assert.assertTrue(index instanceof OIndexTxAwareMultiValue);
 
     final ODocument document = new ODocument(CLASS_NAME).field(FIELD_NAME, 1).save();
@@ -213,7 +213,7 @@ public class IndexTxAwareMultiValueGetTest extends DocumentDBBaseTest {
 
     Assert.assertNotNull(database.getTransaction().getIndexChanges(INDEX_NAME));
     Collection<?> result = ((OIndexTxAwareMultiValue) index).get(1);
-    Assert.assertNull(result);
+    Assert.assertTrue(result.isEmpty());
 
     database.commit();
 
@@ -229,7 +229,7 @@ public class IndexTxAwareMultiValueGetTest extends DocumentDBBaseTest {
 
     database.begin();
 
-    final OIndex<?> index = database.getMetadata().getIndexManagerInternal().getIndex(database, INDEX_NAME);
+    final OIndex index = database.getMetadata().getIndexManagerInternal().getIndex(database, INDEX_NAME);
     Assert.assertTrue(index instanceof OIndexTxAwareMultiValue);
 
     final ODocument document = new ODocument(CLASS_NAME).field(FIELD_NAME, 1).save();

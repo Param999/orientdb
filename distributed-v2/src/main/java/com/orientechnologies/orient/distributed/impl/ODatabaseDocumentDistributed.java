@@ -14,6 +14,7 @@ import com.orientechnologies.orient.core.exception.OConcurrentCreateException;
 import com.orientechnologies.orient.core.exception.OConcurrentModificationException;
 import com.orientechnologies.orient.core.exception.ODatabaseException;
 import com.orientechnologies.orient.core.exception.OLowDiskSpaceException;
+import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
 import com.orientechnologies.orient.core.index.OIndex;
 import com.orientechnologies.orient.core.metadata.OMetadataDefault;
@@ -44,6 +45,7 @@ import com.orientechnologies.orient.server.OServer;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.stream.Stream;
 
 import static com.orientechnologies.orient.core.config.OGlobalConfiguration.DISTRIBUTED_REPLICATION_PROTOCOL_VERSION;
 
@@ -152,7 +154,6 @@ public class ODatabaseDocumentDistributed extends ODatabaseDocumentEmbedded {
   public <T> T sendSequenceAction(OSequenceAction action) throws ExecutionException, InterruptedException {
     OSubmitContext submitContext = ((OSharedContextDistributed) getSharedContext()).getDistributedContext().getSubmitContext();
     OSessionOperationId id = new OSessionOperationId();
-    id.init();
     OSequenceActionCoordinatorSubmit submitAction = new OSequenceActionCoordinatorSubmit(action);
     Future<OSubmitResponse> future = submitContext.send(id, submitAction);
     try {
@@ -189,8 +190,6 @@ public class ODatabaseDocumentDistributed extends ODatabaseDocumentEmbedded {
 
     OSubmitContext submitContext = ((OSharedContextDistributed) getSharedContext()).getDistributedContext().getSubmitContext();
     OSessionOperationId id = new OSessionOperationId();
-    id.init();
-
     Future<OSubmitResponse> future = submitContext.send(id, ts);
     try {
       OTransactionResponse response = (OTransactionResponse) future.get();
@@ -260,11 +259,14 @@ public class ODatabaseDocumentDistributed extends ODatabaseDocumentEmbedded {
     ((OAbstractPaginatedStorage) getStorage().getUnderlying()).preallocateRids(transaction);
 
     for (Map.Entry<String, OTransactionIndexChanges> change : transaction.getIndexOperations().entrySet()) {
-      OIndex<?> index = getSharedContext().getIndexManager().getRawIndex(change.getKey());
+      OIndex index = getSharedContext().getIndexManager().getRawIndex(change.getKey());
       if (OClass.INDEX_TYPE.UNIQUE.name().equals(index.getType()) || OClass.INDEX_TYPE.UNIQUE_HASH_INDEX.name()
           .equals(index.getType())) {
         if (!change.getValue().nullKeyChanges.entries.isEmpty()) {
-          OIdentifiable old = (OIdentifiable) index.get(null);
+          OIdentifiable old;
+          try (Stream<ORID> rids = index.getInternal().getRids(null)) {
+            old = rids.findFirst().orElse(null);
+          }
           Object newValue = change.getValue().nullKeyChanges.entries.get(change.getValue().nullKeyChanges.entries.size() - 1).value;
           if (old != null && !old.equals(newValue)) {
             throw new ORecordDuplicatedException(String
@@ -274,7 +276,10 @@ public class ODatabaseDocumentDistributed extends ODatabaseDocumentEmbedded {
         }
 
         for (OTransactionIndexChangesPerKey changesPerKey : change.getValue().changesPerKey.values()) {
-          OIdentifiable old = (OIdentifiable) index.get(changesPerKey.key);
+          OIdentifiable old;
+          try (Stream<ORID> rids = index.getInternal().getRids(changesPerKey.key)) {
+            old = rids.findFirst().orElse(null);
+          }
           if (!changesPerKey.entries.isEmpty()) {
             Object newValue = changesPerKey.entries.get(changesPerKey.entries.size() - 1).value;
             if (old != null && !old.equals(newValue)) {

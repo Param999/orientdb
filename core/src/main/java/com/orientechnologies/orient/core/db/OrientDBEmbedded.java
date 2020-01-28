@@ -46,6 +46,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static com.orientechnologies.orient.core.config.OGlobalConfiguration.FILE_DELETE_DELAY;
@@ -55,6 +56,15 @@ import static com.orientechnologies.orient.core.config.OGlobalConfiguration.FILE
  * Created by tglman on 08/04/16.
  */
 public class OrientDBEmbedded implements OrientDBInternal {
+  /**
+   * Keeps track of next possible storage id.
+   */
+  private static final AtomicInteger nextStorageId     = new AtomicInteger();
+  /**
+   * Storage IDs current assigned to the storage.
+   */
+  private static final Set<Integer>  currentStorageIds = Collections.newSetFromMap(new ConcurrentHashMap<>());
+
   protected final  Map<String, OAbstractPaginatedStorage> storages       = new HashMap<>();
   protected final  Map<String, OSharedContext>            sharedContexts = new HashMap<>();
   protected final  Set<ODatabasePoolInternal>             pools          = new HashSet<>();
@@ -63,6 +73,7 @@ public class OrientDBEmbedded implements OrientDBInternal {
   protected final  OEngine                                memory;
   protected final  OEngine                                disk;
   protected final  Orient                                 orient;
+  protected final  OCachedDatabasePoolFactory             cachedPoolFactory;
   private volatile boolean                                open           = true;
   private          ExecutorService                        executor;
   private          Timer                                  timer;
@@ -120,12 +131,20 @@ public class OrientDBEmbedded implements OrientDBInternal {
         new LinkedBlockingQueue<>());
     timer = new Timer();
 
+    cachedPoolFactory = createCachedDatabasePoolFactory(this.configurations);
+
     boolean autoClose = this.configurations.getConfigurations().getValueAsBoolean(OGlobalConfiguration.AUTO_CLOSE_AFTER_DELAY);
     if (autoClose) {
       int autoCloseDelay = this.configurations.getConfigurations().getValueAsInteger(OGlobalConfiguration.AUTO_CLOSE_DELAY);
       final long delay = autoCloseDelay * 60 * 1000;
       initAutoClose(delay);
     }
+  }
+
+  protected OCachedDatabasePoolFactory createCachedDatabasePoolFactory(OrientDBConfig config) {
+    int capacity = config.getConfigurations().getValueAsInteger(OGlobalConfiguration.DB_CACHED_POOL_CAPACITY);
+    long timeout = config.getConfigurations().getValueAsInteger(OGlobalConfiguration.DB_CACHED_POOL_CLEAN_UP_TIMEOUT);
+    return new OCachedDatabasePoolFactoryImpl(this, capacity, timeout);
   }
 
   public void initAutoClose(long delay) {
@@ -454,13 +473,22 @@ public class OrientDBEmbedded implements OrientDBInternal {
       storage = storages.get(name);
       if (storage == null) {
         storage = (OAbstractPaginatedStorage) disk
-            .createStorage(buildName(name), new HashMap<>(), maxWALSegmentSize, doubleWriteLogMaxSegSize);
+            .createStorage(buildName(name), new HashMap<>(), maxWALSegmentSize, doubleWriteLogMaxSegSize, generateStorageId());
         if (storage.exists()) {
           storages.put(name, storage);
         }
       }
     }
     return storage;
+  }
+
+  protected final int generateStorageId() {
+    int storageId = Math.abs(nextStorageId.getAndIncrement());
+    while (!currentStorageIds.add(storageId)) {
+      storageId = Math.abs(nextStorageId.getAndIncrement());
+    }
+
+    return storageId;
   }
 
   public synchronized OAbstractPaginatedStorage getStorage(String name) {
@@ -488,10 +516,10 @@ public class OrientDBEmbedded implements OrientDBInternal {
           OAbstractPaginatedStorage storage;
           if (type == ODatabaseType.MEMORY) {
             storage = (OAbstractPaginatedStorage) memory
-                .createStorage(name, new HashMap<>(), maxWALSegmentSize, doubleWriteLogMaxSegSize);
+                .createStorage(name, new HashMap<>(), maxWALSegmentSize, doubleWriteLogMaxSegSize, generateStorageId());
           } else {
             storage = (OAbstractPaginatedStorage) disk
-                .createStorage(buildName(name), new HashMap<>(), maxWALSegmentSize, doubleWriteLogMaxSegSize);
+                .createStorage(buildName(name), new HashMap<>(), maxWALSegmentSize, doubleWriteLogMaxSegSize, generateStorageId());
           }
           storages.put(name, storage);
           embedded = internalCreate(config, storage);
@@ -512,7 +540,7 @@ public class OrientDBEmbedded implements OrientDBInternal {
       if (!exists(name, null, null)) {
         try {
           storage = (OAbstractPaginatedStorage) disk
-              .createStorage(buildName(name), new HashMap<>(), maxWALSegmentSize, doubleWriteLogMaxSegSize);
+              .createStorage(buildName(name), new HashMap<>(), maxWALSegmentSize, doubleWriteLogMaxSegSize, generateStorageId());
           embedded = internalCreate(config, storage);
           storages.put(name, storage);
         } catch (Exception e) {
@@ -566,7 +594,6 @@ public class OrientDBEmbedded implements OrientDBInternal {
   }
 
   protected synchronized OSharedContext getOrCreateSharedContext(OAbstractPaginatedStorage storage) {
-
     OSharedContext result = sharedContexts.get(storage.getName());
     if (result == null) {
       result = createSharedContext(storage);
@@ -606,10 +633,13 @@ public class OrientDBEmbedded implements OrientDBInternal {
       if (exists(name, user, password)) {
         OAbstractPaginatedStorage storage = getOrInitStorage(name);
         OSharedContext sharedContext = sharedContexts.get(name);
-        if (sharedContext != null)
+        if (sharedContext != null) {
           sharedContext.close();
+        }
+        final int storageId = storage.getId();
         storage.delete();
         storages.remove(name);
+        currentStorageIds.remove(storageId);
         sharedContexts.remove(name);
       }
     }
@@ -658,6 +688,19 @@ public class OrientDBEmbedded implements OrientDBInternal {
   }
 
   @Override
+  public ODatabasePoolInternal cachedPool(String database, String user, String password) {
+    return cachedPool(database, user, password, null);
+  }
+
+  @Override
+  public ODatabasePoolInternal cachedPool(String database, String user, String password, OrientDBConfig config) {
+    checkOpen();
+    ODatabasePoolInternal pool = cachedPoolFactory.get(database, user, password, solveConfig(config));
+    pools.add(pool);
+    return pool;
+  }
+
+  @Override
   public void close() {
     if (!open)
       return;
@@ -674,6 +717,7 @@ public class OrientDBEmbedded implements OrientDBInternal {
     synchronized (this) {
       removeShutdownHook();
       internalClose();
+      currentStorageIds.clear();
     }
   }
 
@@ -756,7 +800,7 @@ public class OrientDBEmbedded implements OrientDBInternal {
     synchronized (this) {
       boolean exists = OLocalPaginatedStorage.exists(Paths.get(path));
       OAbstractPaginatedStorage storage = (OAbstractPaginatedStorage) disk
-          .createStorage(path, new HashMap<>(), maxWALSegmentSize, doubleWriteLogMaxSegSize);
+          .createStorage(path, new HashMap<>(), maxWALSegmentSize, doubleWriteLogMaxSegSize, generateStorageId());
       // TODO: Add Creation settings and parameters
       if (!exists) {
         embedded = internalCreate(getConfigurations(), storage);

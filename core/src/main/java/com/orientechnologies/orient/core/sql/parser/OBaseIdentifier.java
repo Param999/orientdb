@@ -40,13 +40,6 @@ public class OBaseIdentifier extends SimpleNode {
     this.suffix = new OSuffixIdentifier(attr);
   }
 
-  /**
-   * Accept the visitor.
-   **/
-  public Object jjtAccept(OrientSqlVisitor visitor, Object data) {
-    return visitor.visit(this, data);
-  }
-
   public void toString(Map<Object, Object> params, StringBuilder builder) {
     if (levelZero != null) {
       levelZero.toString(params, builder);
@@ -386,7 +379,7 @@ public class OBaseIdentifier extends SimpleNode {
       if (prop == null) {
         return false;
       }
-      Collection<OIndex<?>> allIndexes = prop.getAllIndexes();
+      Collection<OIndex> allIndexes = prop.getAllIndexes();
 
       return allIndexes != null && allIndexes.stream().anyMatch(idx -> idx.getDefinition().getFields().size() == 1);
     }

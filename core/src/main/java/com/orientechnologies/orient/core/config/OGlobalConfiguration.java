@@ -261,7 +261,10 @@ public enum OGlobalConfiguration { // ENVIRONMENT
   STORAGE_PESSIMISTIC_LOCKING("storage.pessimisticLock",
       "Set the approach of the pessimistic locking, valid options: none, modification, readwrite", String.class, "none"),
 
-  USE_WAL("storage.useWAL", "Whether WAL should be used in paginated storage", Boolean.class, true),
+  /**
+   * @deprecated WAL can not be disabled because that is very unsafe for consistency and durability
+   */
+  @Deprecated USE_WAL("storage.useWAL", "Whether WAL should be used in paginated storage", Boolean.class, true),
 
   @Deprecated USE_CHM_CACHE("storage.useCHMCache",
       "Whether to use new disk cache implementation based on CHM or old one based on cuncurrent queues", Boolean.class, true),
@@ -296,7 +299,7 @@ public enum OGlobalConfiguration { // ENVIRONMENT
   WAL_MAX_SIZE("storage.wal.maxSize", "Maximum size of WAL on disk (in megabytes)", Integer.class, -1),
 
   WAL_ALLOW_DIRECT_IO("storage.wal.allowDirectIO",
-      "Allows usage of direct IO API on Linux OS to avoid keeping of WAL data in " + "OS buffer", Boolean.class, true),
+      "Allows usage of direct IO API on Linux OS to avoid keeping of WAL data in OS buffer", Boolean.class, false),
 
   WAL_COMMIT_TIMEOUT("storage.wal.commitTimeout", "Maximum interval between WAL commits (in ms.)", Integer.class, 1000),
 
@@ -380,14 +383,20 @@ public enum OGlobalConfiguration { // ENVIRONMENT
   DOCUMENT_BINARY_MAPPING("document.binaryMapping", "Mapping approach for binary fields", Integer.class, 0),
 
   // DATABASE
-  DB_POOL_MIN("db.pool.min", "Default database pool minimum size", Integer.class, 0),
+  DB_POOL_MIN("db.pool.min", "Default database pool minimum size", Integer.class, 1),
 
   DB_POOL_MAX("db.pool.max", "Default database pool maximum size", Integer.class, 100),
 
+  DB_CACHED_POOL_CAPACITY("db.cached.pool.capacity", "Default database cached pools capacity", Integer.class, 100),
+
+  DB_CACHED_POOL_CLEAN_UP_TIMEOUT("db.cached.pool.cleanUpTimeout", "Default timeout for clean up cache from unused or closed database pools, value in milliseconds", Long.class, 600_000),
+
   DB_POOL_ACQUIRE_TIMEOUT("db.pool.acquireTimeout", "Default database pool timeout in milliseconds", Integer.class, 60000),
 
+  @Deprecated
   DB_POOL_IDLE_TIMEOUT("db.pool.idleTimeout", "Timeout for checking for free databases in the pool", Integer.class, 0),
 
+  @Deprecated
   DB_POOL_IDLE_CHECK_DELAY("db.pool.idleCheckDelay", "Delay time on checking for idle databases", Integer.class, 0),
 
   DB_MVCC_THROWFAST("db.mvcc.throwfast",
@@ -395,6 +404,8 @@ public enum OGlobalConfiguration { // ENVIRONMENT
           + "Set to true, when these exceptions are thrown, but the details are not necessary", Boolean.class, false, true),
 
   DB_VALIDATION("db.validation", "Enables or disables validation of records", Boolean.class, true, true),
+
+  DB_CUSTOM_SUPPORT("db.custom.support", "Enables or disables use of custom types", Boolean.class, false, false),
 
   // SETTINGS OF NON-TRANSACTIONAL MODE
   @Deprecated NON_TX_RECORD_UPDATE_SYNCH("nonTX.recordUpdate.synch",
@@ -464,7 +475,7 @@ public enum OGlobalConfiguration { // ENVIRONMENT
       "Indicates the index durability level in TX mode. Can be ROLLBACK_ONLY or FULL (ROLLBACK_ONLY by default)", String.class,
       "FULL"),
 
-  INDEX_CURSOR_PREFETCH_SIZE("index.cursor.prefetchSize", "Default prefetch size of index cursor", Integer.class, 10000),
+  INDEX_CURSOR_PREFETCH_SIZE("index.stream.prefetchSize", "Default prefetch size of index stream", Integer.class, 10),
 
   // SBTREE
   SBTREE_MAX_DEPTH("sbtree.maxDepth",
@@ -600,7 +611,7 @@ public enum OGlobalConfiguration { // ENVIRONMENT
 
   NETWORK_HTTP_USE_TOKEN("network.http.useToken", "Enable Token based sessions for http", Boolean.class, false),
 
-  NETWORK_TOKEN_SECRETKEY("network.token.secretKey", "Network token sercret key", String.class, ""),
+  NETWORK_TOKEN_SECRETKEY("network.token.secretKey", "Network token sercret key", String.class, "", false, true),
 
   NETWORK_TOKEN_ENCRYPTION_ALGORITHM("network.token.encryptionAlgorithm", "Network token algorithm", String.class, "HmacSHA256"),
 
@@ -730,7 +741,8 @@ public enum OGlobalConfiguration { // ENVIRONMENT
 
   QUERY_LIVE_SUPPORT("query.live.support", "Enable/Disable the support of live query. (Use false to disable)", Boolean.class, true),
 
-  STATEMENT_CACHE_SIZE("statement.cacheSize", "Number of parsed SQL statements kept in cache. Zero means cache disabled", Integer.class, 100),
+  STATEMENT_CACHE_SIZE("statement.cacheSize", "Number of parsed SQL statements kept in cache. Zero means cache disabled",
+      Integer.class, 100),
 
   // GRAPH
   SQL_GRAPH_CONSISTENCY_MODE("sql.graphConsistencyMode",
@@ -760,11 +772,11 @@ public enum OGlobalConfiguration { // ENVIRONMENT
 
   CLIENT_SSL_KEYSTORE("client.ssl.keyStore", "Use SSL for client connections", String.class, null),
 
-  CLIENT_SSL_KEYSTORE_PASSWORD("client.ssl.keyStorePass", "Use SSL for client connections", String.class, null),
+  CLIENT_SSL_KEYSTORE_PASSWORD("client.ssl.keyStorePass", "Use SSL for client connections", String.class, null, false, true),
 
   CLIENT_SSL_TRUSTSTORE("client.ssl.trustStore", "Use SSL for client connections", String.class, null),
 
-  CLIENT_SSL_TRUSTSTORE_PASSWORD("client.ssl.trustStorePass", "Use SSL for client connections", String.class, null),
+  CLIENT_SSL_TRUSTSTORE_PASSWORD("client.ssl.trustStorePass", "Use SSL for client connections", String.class, null, false, true),
 
   // SERVER
   SERVER_OPEN_ALL_DATABASES_AT_STARTUP("server.openAllDatabasesAtStartup",
@@ -1009,7 +1021,7 @@ public enum OGlobalConfiguration { // ENVIRONMENT
       "The file path of the keystore used by the symmetric key credential interceptor", String.class, null),
 
   @OApi(maturity = OApi.MATURITY.NEW) CLIENT_CI_KEYSTORE_PASSWORD("client.ci.keystore.password",
-      "The password of the keystore used by the symmetric key credential interceptor", String.class, null),
+      "The password of the keystore used by the symmetric key credential interceptor", String.class, null, false, true),
 
   /**
    * @Since 2.2
@@ -1047,7 +1059,7 @@ public enum OGlobalConfiguration { // ENVIRONMENT
   @Deprecated DB_MAKE_FULL_CHECKPOINT_ON_SCHEMA_CHANGE("db.makeFullCheckpointOnSchemaChange",
       "When index schema is changed, a full checkpoint is performed", Boolean.class, true, true),
 
-  @Deprecated OAUTH2_SECRETKEY("oauth2.secretkey", "Http OAuth2 secret key", String.class, ""),
+  @Deprecated OAUTH2_SECRETKEY("oauth2.secretkey", "Http OAuth2 secret key", String.class, "", false, true),
 
   @Deprecated STORAGE_USE_CRC32_FOR_EACH_RECORD("storage.cluster.usecrc32",
       "Indicates whether crc32 should be used for each record to check record integrity", Boolean.class, false),
@@ -1065,8 +1077,8 @@ public enum OGlobalConfiguration { // ENVIRONMENT
       "Executes a synch against the file-system at every log entry. This slows down transactions but guarantee transaction reliability on unreliable drives",
       Boolean.class, Boolean.FALSE),
 
-  @Deprecated TX_USE_LOG("tx.useLog",
-      "Transactions use log file to store temporary data to be rolled back in case of crash", Boolean.class, true),
+  @Deprecated TX_USE_LOG("tx.useLog", "Transactions use log file to store temporary data to be rolled back in case of crash",
+      Boolean.class, true),
 
   @Deprecated INDEX_AUTO_REBUILD_AFTER_NOTSOFTCLOSE("index.auto.rebuildAfterNotSoftClose",
       "Auto rebuild all automatic indexes after upon database open when wasn't closed properly", Boolean.class, true),
@@ -1175,7 +1187,6 @@ public enum OGlobalConfiguration { // ENVIRONMENT
    * Find the OGlobalConfiguration instance by the key. Key is case insensitive.
    *
    * @param iKey Key to find. It's case insensitive.
-   *
    * @return OGlobalConfiguration instance if found, otherwise null
    */
   public static OGlobalConfiguration findByKey(final String iKey) {

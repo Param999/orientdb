@@ -24,7 +24,6 @@ import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.serialization.OStreamable;
 import com.orientechnologies.orient.core.serialization.OStreamableHelper;
 import com.orientechnologies.orient.core.serialization.serializer.record.binary.ORecordSerializerNetworkDistributed;
-import com.orientechnologies.orient.core.serialization.serializer.record.binary.ORecordSerializerNetworkV37;
 import com.orientechnologies.orient.server.distributed.impl.task.transaction.*;
 
 import java.io.DataInput;
@@ -101,6 +100,8 @@ public class OTransactionPhase1TaskResult implements OStreamable {
         out.write(keyBytes);
       }
       break;
+    case OTxStillRunning.ID:
+      break;
 
     }
   }
@@ -157,6 +158,10 @@ public class OTransactionPhase1TaskResult implements OStreamable {
         keyValue = ORecordSerializerNetworkDistributed.INSTANCE.deserializeValue(keyBytes, type2);
       }
       this.resultPayload = new OTxUniqueIndex(rid2, indexName, keyValue);
+      break;
+    case OTxStillRunning.ID:
+      this.resultPayload = new OTxStillRunning();
+      break;
     }
   }
 

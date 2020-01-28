@@ -23,11 +23,11 @@ import com.orientechnologies.common.comparator.ODefaultComparator;
 import com.orientechnologies.common.listener.OProgressListener;
 import com.orientechnologies.common.serialization.types.OBinarySerializer;
 import com.orientechnologies.common.types.OModifiableBoolean;
+import com.orientechnologies.common.util.ORawPair;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.exception.OInvalidIndexEngineIdException;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.index.engine.OBaseIndexEngine;
-import com.orientechnologies.orient.core.iterator.OEmptyIterator;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.serialization.serializer.stream.OMixedIndexRIDContainerSerializer;
 import com.orientechnologies.orient.core.serialization.serializer.stream.OStreamSerializerSBTreeIndexRIDContainer;
@@ -38,69 +38,60 @@ import com.orientechnologies.orient.core.storage.ridbag.sbtree.OMixedIndexRIDCon
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Abstract index implementation that supports multi-values for the same key.
  *
  * @author Luca Garulli (l.garulli--(at)--orientdb.com)
  */
-public abstract class OIndexMultiValues extends OIndexAbstract<Collection<ORID>> {
+public abstract class OIndexMultiValues extends OIndexAbstract {
   OIndexMultiValues(String name, final String type, String algorithm, int version, OAbstractPaginatedStorage storage,
       String valueContainerAlgorithm, final ODocument metadata, final int binaryFormatVersion) {
     super(name, type, algorithm, valueContainerAlgorithm, metadata, version, storage, binaryFormatVersion);
   }
 
+  @Deprecated
+  @Override
   public Collection<ORID> get(Object key) {
-    key = getCollatingValue(key);
-
-    acquireSharedLock();
-    try {
-
-      Collection<ORID> values;
-      while (true) {
-        try {
-          //noinspection unchecked
-          values = (Collection<ORID>) storage.getIndexValue(indexId, key);
-          break;
-        } catch (OInvalidIndexEngineIdException ignore) {
-          doReloadIndexEngine();
-        }
-      }
-
-      if (values == null) {
-        return Collections.emptyList();
-      }
-
-      return OIndexInternal.securityFilterOnRead(this, (Collection)values);
-
-    } finally {
-      releaseSharedLock();
+    final List<ORID> rids;
+    try (Stream<ORID> stream = getRids(key)) {
+      rids = stream.collect(Collectors.toList());
     }
+    return rids;
   }
 
-  public long count(Object key) {
+  @Override
+  public Stream<ORID> getRids(Object key) {
     key = getCollatingValue(key);
 
     acquireSharedLock();
     try {
-
-      Collection<ORID> values;
-
+      Stream<ORID> stream;
       while (true) {
         try {
-          //noinspection unchecked
-          values = (Collection<ORID>) storage.getIndexValue(indexId, key);
-          break;
+          if (apiVersion == 0) {
+            //noinspection unchecked
+            final Collection<ORID> values = (Collection<ORID>) storage.getIndexValue(indexId, key);
+            if (values != null) {
+              //noinspection resource
+              stream = values.stream();
+            } else {
+              //noinspection resource
+              stream = Stream.empty();
+            }
+          } else if (apiVersion == 1) {
+            //noinspection resource
+            stream = storage.getIndexValues(indexId, key);
+          } else {
+            throw new IllegalStateException("Invalid version of index API - " + apiVersion);
+          }
+          return IndexStreamSecurityDecorator.decorateRidStream(this, stream);
         } catch (OInvalidIndexEngineIdException ignore) {
           doReloadIndexEngine();
         }
       }
-
-      if (values == null) {
-        return 0;
-      }
-
-      return OIndexInternal.securityFilterOnRead(this, (Collection)values).size();
     } finally {
       releaseSharedLock();
     }
@@ -278,8 +269,8 @@ public abstract class OIndexMultiValues extends OIndexAbstract<Collection<ORID>>
   }
 
   @Override
-  public OIndexCursor iterateEntriesBetween(Object fromKey, boolean fromInclusive, Object toKey, boolean toInclusive,
-      boolean ascOrder) {
+  public Stream<ORawPair<Object, ORID>> streamEntriesBetween(Object fromKey, boolean fromInclusive, Object toKey,
+      boolean toInclusive, boolean ascOrder) {
     fromKey = getCollatingValue(fromKey);
     toKey = getCollatingValue(toKey);
 
@@ -287,8 +278,9 @@ public abstract class OIndexMultiValues extends OIndexAbstract<Collection<ORID>>
     try {
       while (true) {
         try {
-          return new OIndexCursorSecurityDecorator(storage.iterateIndexEntriesBetween(indexId, fromKey, fromInclusive, toKey, toInclusive, ascOrder,
-              MultiValuesTransformer.INSTANCE), this);
+          return IndexStreamSecurityDecorator.decorateStream(this, storage
+              .iterateIndexEntriesBetween(indexId, fromKey, fromInclusive, toKey, toInclusive, ascOrder,
+                  MultiValuesTransformer.INSTANCE));
         } catch (OInvalidIndexEngineIdException ignore) {
           doReloadIndexEngine();
         }
@@ -299,14 +291,15 @@ public abstract class OIndexMultiValues extends OIndexAbstract<Collection<ORID>>
   }
 
   @Override
-  public OIndexCursor iterateEntriesMajor(Object fromKey, boolean fromInclusive, boolean ascOrder) {
+  public Stream<ORawPair<Object, ORID>> streamEntriesMajor(Object fromKey, boolean fromInclusive, boolean ascOrder) {
     fromKey = getCollatingValue(fromKey);
 
     acquireSharedLock();
     try {
       while (true) {
         try {
-          return new OIndexCursorSecurityDecorator(storage.iterateIndexEntriesMajor(indexId, fromKey, fromInclusive, ascOrder, MultiValuesTransformer.INSTANCE), this);
+          return IndexStreamSecurityDecorator.decorateStream(this,
+              storage.iterateIndexEntriesMajor(indexId, fromKey, fromInclusive, ascOrder, MultiValuesTransformer.INSTANCE));
         } catch (OInvalidIndexEngineIdException ignore) {
           doReloadIndexEngine();
         }
@@ -317,14 +310,15 @@ public abstract class OIndexMultiValues extends OIndexAbstract<Collection<ORID>>
   }
 
   @Override
-  public OIndexCursor iterateEntriesMinor(Object toKey, boolean toInclusive, boolean ascOrder) {
+  public Stream<ORawPair<Object, ORID>> streamEntriesMinor(Object toKey, boolean toInclusive, boolean ascOrder) {
     toKey = getCollatingValue(toKey);
 
     acquireSharedLock();
     try {
       while (true) {
         try {
-          return new OIndexCursorSecurityDecorator(storage.iterateIndexEntriesMinor(indexId, toKey, toInclusive, ascOrder, MultiValuesTransformer.INSTANCE), this);
+          return IndexStreamSecurityDecorator.decorateStream(this,
+              storage.iterateIndexEntriesMinor(indexId, toKey, toInclusive, ascOrder, MultiValuesTransformer.INSTANCE));
         } catch (OInvalidIndexEngineIdException ignore) {
           doReloadIndexEngine();
         }
@@ -335,7 +329,7 @@ public abstract class OIndexMultiValues extends OIndexAbstract<Collection<ORID>>
   }
 
   @Override
-  public OIndexCursor iterateEntries(Collection<?> keys, boolean ascSortOrder) {
+  public Stream<ORawPair<Object, ORID>> streamEntries(Collection<?> keys, boolean ascSortOrder) {
     final List<Object> sortedKeys = new ArrayList<>(keys);
     final Comparator<Object> comparator;
     if (ascSortOrder) {
@@ -346,74 +340,37 @@ public abstract class OIndexMultiValues extends OIndexAbstract<Collection<ORID>>
 
     sortedKeys.sort(comparator);
 
-    return new OIndexCursorSecurityDecorator(new OIndexAbstractCursor() {
-      private final Iterator<?> keysIterator = sortedKeys.iterator();
+    //noinspection resource
+    return IndexStreamSecurityDecorator.decorateStream(this, sortedKeys.stream().flatMap((key) -> {
+      key = getCollatingValue(key);
 
-      private Iterator<ORID> currentIterator = OEmptyIterator.IDENTIFIABLE_INSTANCE;
-      private Object currentKey;
-
-      @Override
-      public Map.Entry<Object, OIdentifiable> nextEntry() {
-        if (currentIterator == null) {
-          return null;
-        }
-
-        Object key = null;
-        if (!currentIterator.hasNext()) {
-          Collection<ORID> result = null;
-          while (keysIterator.hasNext() && (result == null || result.isEmpty())) {
-            key = keysIterator.next();
-            key = getCollatingValue(key);
-
-            acquireSharedLock();
-            try {
-              while (true) {
-                try {
-                  //noinspection unchecked
-                  result = (Collection<ORID>) storage.getIndexValue(indexId, key);
-                  break;
-                } catch (OInvalidIndexEngineIdException ignore) {
-                  doReloadIndexEngine();
-                }
-              }
-
-            } finally {
-              releaseSharedLock();
+      final Object entryKey = key;
+      acquireSharedLock();
+      try {
+        while (true) {
+          try {
+            if (apiVersion == 0) {
+              //noinspection unchecked,resource
+              return Optional.ofNullable((Collection<ORID>) storage.getIndexValue(indexId, key))
+                  .map((rids) -> rids.stream().map((rid) -> new ORawPair<>(entryKey, rid))).orElse(Stream.empty());
+            } else if (apiVersion == 1) {
+              //noinspection resource
+              return storage.getIndexValues(indexId, key).map((rid) -> new ORawPair<>(entryKey, rid));
+            } else {
+              throw new IllegalStateException("Invalid version of index API - " + apiVersion);
             }
+          } catch (OInvalidIndexEngineIdException ignore) {
+            doReloadIndexEngine();
           }
-
-          if (result == null || result.isEmpty()) {
-            currentIterator = null;
-            return null;
-          }
-
-          currentKey = key;
-          currentIterator = result.iterator();
         }
 
-        final OIdentifiable resultValue = currentIterator.next();
-
-        return new Map.Entry<Object, OIdentifiable>() {
-          @Override
-          public Object getKey() {
-            return currentKey;
-          }
-
-          @Override
-          public OIdentifiable getValue() {
-            return resultValue;
-          }
-
-          @Override
-          public OIdentifiable setValue(OIdentifiable value) {
-            throw new UnsupportedOperationException("setValue");
-          }
-        };
+      } finally {
+        releaseSharedLock();
       }
-    }, this);
+    }));
   }
 
-  public long getSize() {
+  public long size() {
     acquireSharedLock();
     try {
       while (true) {
@@ -429,28 +386,14 @@ public abstract class OIndexMultiValues extends OIndexAbstract<Collection<ORID>>
 
   }
 
-  public long getKeySize() {
-    acquireSharedLock();
-    try {
-      while (true) {
-        try {
-          return storage.getIndexSize(indexId, null);
-        } catch (OInvalidIndexEngineIdException ignore) {
-          doReloadIndexEngine();
-        }
-      }
-    } finally {
-      releaseSharedLock();
-    }
-  }
-
   @Override
-  public OIndexCursor cursor() {
+  public Stream<ORawPair<Object, ORID>> stream() {
     acquireSharedLock();
     try {
       while (true) {
         try {
-          return new OIndexCursorSecurityDecorator(storage.getIndexCursor(indexId, MultiValuesTransformer.INSTANCE), this);
+          return IndexStreamSecurityDecorator
+              .decorateStream(this, storage.getIndexStream(indexId, MultiValuesTransformer.INSTANCE));
         } catch (OInvalidIndexEngineIdException ignore) {
           doReloadIndexEngine();
         }
@@ -462,12 +405,13 @@ public abstract class OIndexMultiValues extends OIndexAbstract<Collection<ORID>>
   }
 
   @Override
-  public OIndexCursor descCursor() {
+  public Stream<ORawPair<Object, ORID>> descStream() {
     acquireSharedLock();
     try {
       while (true) {
         try {
-          return new OIndexCursorSecurityDecorator(storage.getIndexDescCursor(indexId, MultiValuesTransformer.INSTANCE), this);
+          return IndexStreamSecurityDecorator
+              .decorateStream(this, storage.getIndexDescStream(indexId, MultiValuesTransformer.INSTANCE));
         } catch (OInvalidIndexEngineIdException ignore) {
           doReloadIndexEngine();
         }
@@ -491,7 +435,7 @@ public abstract class OIndexMultiValues extends OIndexAbstract<Collection<ORID>>
     private final OIdentifiable      value;
     private final OModifiableBoolean removed;
 
-    EntityRemover(OIdentifiable value, OModifiableBoolean removed) {
+    private EntityRemover(OIdentifiable value, OModifiableBoolean removed) {
       this.value = value;
       this.removed = removed;
     }

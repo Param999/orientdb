@@ -3,7 +3,6 @@
 package com.orientechnologies.orient.core.sql.parser;
 
 import com.orientechnologies.orient.core.command.OCommandContext;
-import com.orientechnologies.orient.core.db.ODatabase;
 import com.orientechnologies.orient.core.db.ODatabaseInternal;
 import com.orientechnologies.orient.core.db.ODatabaseSession;
 import com.orientechnologies.orient.core.exception.OCommandExecutionException;
@@ -22,8 +21,8 @@ public class OAlterRoleStatement extends OSimpleExecStatement {
 
   static class Op {
 
-    static int TYPE_ADD = 0;
-    static int TYPE_REMOVE = 1;
+    protected static int TYPE_ADD = 0;
+    protected static int TYPE_REMOVE = 1;
 
     Op(int type, OSecurityResourceSegment resource, OIdentifier policyName) {
       this.type = type;
@@ -106,11 +105,5 @@ public class OAlterRoleStatement extends OSimpleExecStatement {
     }
   }
 
-  /**
-   * Accept the visitor.
-   **/
-  public Object jjtAccept(OrientSqlVisitor visitor, Object data) {
-    return visitor.visit(this, data);
-  }
 }
 /* JavaCC - OriginalChecksum=1a221cad0dfbc01f66a720300b776def (do not edit this line) */

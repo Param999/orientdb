@@ -25,17 +25,12 @@ public class OContainsAllCondition extends OBooleanExpression {
     super(p, id);
   }
 
-  /**
-   * Accept the visitor.
-   **/
-  public Object jjtAccept(OrientSqlVisitor visitor, Object data) {
-    return visitor.visit(this, data);
-  }
-
   public boolean execute(Object left, Object right) {
     if (left instanceof Collection) {
       if (right instanceof Collection) {
-        return ((Collection) left).containsAll((Collection) right);
+        if (((Collection) left).containsAll((Collection) right)) {
+          return true;
+        }
       }
       if (right instanceof Iterable) {
         right = ((Iterable) right).iterator();
@@ -44,10 +39,17 @@ public class OContainsAllCondition extends OBooleanExpression {
         Iterator iterator = (Iterator) right;
         while (iterator.hasNext()) {
           Object next = iterator.next();
-          if (!((Collection) left).contains(next)) {
+          boolean found = false;
+          if (((Collection) left).contains(next)) {
+            found = true;
+          } else if (next instanceof OResult && ((OResult) next).isElement() && ((Collection) left).contains(((OResult) next).toElement())) {
+            found = true;
+          }
+          if (!found) {
             return false;
           }
         }
+        return true;
       }
       return ((Collection) left).contains(right);
     }

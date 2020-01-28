@@ -6,12 +6,13 @@ import com.orientechnologies.orient.core.command.OCommandContext;
 import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.exception.OCommandExecutionException;
-import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.index.OIndex;
-import com.orientechnologies.orient.core.index.OIndexMultiValues;
 import com.orientechnologies.orient.core.sql.parser.*;
 
-import java.util.*;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * Created by luigidellaquila on 20/03/17.
@@ -20,7 +21,7 @@ public class InsertIntoIndexStep extends AbstractExecutionStep {
   private final OIndexIdentifier targetIndex;
   private final OInsertBody      body;
 
-  boolean executed = false;
+  private boolean executed = false;
 
   public InsertIntoIndexStep(OIndexIdentifier targetIndex, OInsertBody insertBody, OCommandContext ctx, boolean profilingEnabled) {
     super(ctx, profilingEnabled);
@@ -44,7 +45,7 @@ public class InsertIntoIndexStep extends AbstractExecutionStep {
         }
         //TODO
         final ODatabaseDocumentInternal database = (ODatabaseDocumentInternal) ctx.getDatabase();
-        OIndex<?> index = database.getMetadata().getIndexManagerInternal().getIndex(database, targetIndex.getIndexName());
+        OIndex index = database.getMetadata().getIndexManagerInternal().getIndex(database, targetIndex.getIndexName());
         if (index == null) {
           throw new OCommandExecutionException("Index not found: " + targetIndex);
         }
@@ -143,14 +144,7 @@ public class InsertIntoIndexStep extends AbstractExecutionStep {
       }
 
       private void insertIntoIndex(final OIndex index, final Object key, final OIdentifiable value) {
-        if (index instanceof OIndexMultiValues) {
-          final Collection<ORID> rids = ((OIndexMultiValues) index).get(key);
-          if (!rids.contains(value.getIdentity())) {
-            index.put(key, value);
-          }
-        } else {
-          index.put(key, value);
-        }
+        index.put(key, value);
       }
 
       @Override

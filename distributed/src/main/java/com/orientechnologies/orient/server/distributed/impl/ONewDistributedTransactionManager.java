@@ -46,7 +46,7 @@ import com.orientechnologies.orient.server.distributed.task.ODistributedRecordLo
 import java.io.IOException;
 import java.util.*;
 
-import static com.orientechnologies.orient.core.config.OGlobalConfiguration.*;
+import static com.orientechnologies.orient.core.config.OGlobalConfiguration.DISTRIBUTED_ATOMIC_LOCK_TIMEOUT;
 
 /**
  * Distributed transaction manager.
@@ -320,7 +320,7 @@ public class ONewDistributedTransactionManager {
           messages.add(String.format("exception (node " + node + "): '%s'", ((OTxException) result).getException().getMessage()));
           break;
         case OTxUniqueIndex.ID:
-          messages.add(String.format("unique index violation on index (node " + node + "):'$s' with key:'%s' and rid:'%s'",
+          messages.add(String.format("unique index violation on index (node " + node + "):'%s' with key:'%s' and rid:'%s'",
               ((OTxUniqueIndex) result).getIndex(), ((OTxUniqueIndex) result).getKey(), ((OTxUniqueIndex) result).getRecordId()));
           break;
 
@@ -329,8 +329,9 @@ public class ONewDistributedTransactionManager {
       sendPhase2Task(involvedClusters, nodes, new OTransactionPhase2Task(requestId, false, involvedClustersIds, getLsn()));
       localKo(requestId, database);
 
-      ODistributedOperationException ex = new ODistributedOperationException(
-          String.format("quorum of '%i' not reached, responses: [%s]", responseManager.getQuorum(), String.join(",", messages)));
+      ODistributedOperationException ex = new ODistributedOperationException(String
+          .format("Request `%s` didn't reach the quorum of '%d', responses: [%s]", requestId, responseManager.getQuorum(),
+              String.join(",", messages)));
       for (Exception e : exceptions) {
         ex.addSuppressed(e);
       }

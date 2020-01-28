@@ -20,7 +20,6 @@ import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.record.impl.ODocumentInternal;
 import com.orientechnologies.orient.core.schedule.OScheduledEvent;
 import com.orientechnologies.orient.core.serialization.serializer.record.binary.ORecordSerializerNetworkDistributed;
-import com.orientechnologies.orient.core.serialization.serializer.record.binary.ORecordSerializerNetworkV37;
 import com.orientechnologies.orient.core.tx.OTransactionIndexChanges;
 import com.orientechnologies.orient.core.tx.OTransactionOptimistic;
 import com.orientechnologies.orient.distributed.impl.coordinator.transaction.OIndexKeyChange;
@@ -85,7 +84,7 @@ public class OTransactionOptimisticDistributed extends OTransactionOptimistic {
     }
 
     for (OIndexOperationRequest indexChange : indexes) {
-      OIndex<?> index = database.getMetadata().getIndexManagerInternal().getIndex(database, indexChange.getIndexName());
+      OIndex index = database.getMetadata().getIndexManagerInternal().getIndex(database, indexChange.getIndexName());
       if (indexChange.isCleanIndexValues()) {
         addIndexEntry(index, indexChange.getIndexName(), OTransactionIndexChanges.OPERATION.CLEAR, null, null);
       }

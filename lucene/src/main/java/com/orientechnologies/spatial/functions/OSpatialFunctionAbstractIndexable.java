@@ -14,14 +14,17 @@
  */
 package com.orientechnologies.spatial.functions;
 
-import com.orientechnologies.lucene.collections.OLuceneResultSet;
+import com.orientechnologies.lucene.collections.OLuceneResultSetEmpty;
 import com.orientechnologies.orient.core.command.OCommandContext;
 import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.exception.OCommandExecutionException;
 import com.orientechnologies.orient.core.index.OIndex;
 import com.orientechnologies.orient.core.metadata.OMetadata;
 import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.sql.executor.OResult;
+import com.orientechnologies.orient.core.sql.executor.OResultInternal;
 import com.orientechnologies.orient.core.sql.functions.OIndexableSQLFunction;
 import com.orientechnologies.orient.core.sql.parser.*;
 import com.orientechnologies.spatial.index.OLuceneSpatialIndex;
@@ -36,7 +39,7 @@ import java.util.stream.Collectors;
  */
 public abstract class OSpatialFunctionAbstractIndexable extends OSpatialFunctionAbstract implements OIndexableSQLFunction {
 
-  OShapeFactory factory = OShapeFactory.INSTANCE;
+  protected OShapeFactory factory = OShapeFactory.INSTANCE;
 
   public OSpatialFunctionAbstractIndexable(String iName, int iMinParams, int iMaxParams) {
     super(iName, iMinParams, iMaxParams);
@@ -65,7 +68,7 @@ public abstract class OSpatialFunctionAbstractIndexable extends OSpatialFunction
     return ODatabaseRecordThreadLocal.instance().get();
   }
 
-  protected OLuceneResultSet results(OFromClause target, OExpression[] args, OCommandContext ctx, Object rightValue) {
+  protected Iterable<OIdentifiable> results(OFromClause target, OExpression[] args, OCommandContext ctx, Object rightValue) {
     OIndex oIndex = searchForIndex(target, args);
 
     if (oIndex == null) {
@@ -82,6 +85,37 @@ public abstract class OSpatialFunctionAbstractIndexable extends OSpatialFunction
     } else {
       shape = args[1].execute((OIdentifiable) null, ctx);
     }
+
+    if (shape instanceof Collection) {
+      int size = ((Collection) shape).size();
+
+      if (size == 0) {
+        return new OLuceneResultSetEmpty();
+      }
+      if (size == 1) {
+
+        Object next = ((Collection) shape).iterator().next();
+
+        if (next instanceof OResult) {
+          OResult inner = (OResult) next;
+          Set<String> propertyNames = inner.getPropertyNames();
+          if (propertyNames.size() == 1) {
+            Object property = inner.getProperty(propertyNames.iterator().next());
+            if (property instanceof OResult) {
+              shape = ((OResult) property).toElement();
+            }
+          } else {
+            return new OLuceneResultSetEmpty();
+          }
+        }
+      } else {
+        throw new OCommandExecutionException("The collection in input cannot be major than 1");
+      }
+    }
+
+    if (shape instanceof OResultInternal) {
+      shape = ((OResultInternal) shape).toElement();
+    }
     queryParams.put(SpatialQueryBuilderAbstract.SHAPE, shape);
 
     onAfterParsing(queryParams, args, ctx, rightValue);
@@ -92,7 +126,7 @@ public abstract class OSpatialFunctionAbstractIndexable extends OSpatialFunction
       ctx.setVariable("involvedIndexes", indexes);
     }
     indexes.add(oIndex.getName());
-    return (OLuceneResultSet) oIndex.get(queryParams);
+    return oIndex.getInternal().getRids(queryParams).collect(Collectors.toSet());
   }
 
   protected void onAfterParsing(Map<String, Object> params, OExpression[] args, OCommandContext ctx, Object rightValue) {
@@ -128,7 +162,7 @@ public abstract class OSpatialFunctionAbstractIndexable extends OSpatialFunction
 
     OLuceneSpatialIndex index = searchForIndex(target, args);
 
-    return index == null ? -1 : index.getSize();
+    return index == null ? -1 : index.size();
   }
 
   public <T> boolean intersect(List<T> list1, List<T> list2) {

@@ -82,8 +82,8 @@ public class OMatchStatement extends OStatement implements OCommandExecutor, OIt
   }
 
   public static class EdgeTraversal {
-    boolean     out = true;
-    PatternEdge edge;
+    private boolean     out = true;
+    private PatternEdge edge;
 
     public EdgeTraversal(PatternEdge edge, boolean out) {
       this.edge = edge;
@@ -180,13 +180,6 @@ public class OMatchStatement extends OStatement implements OCommandExecutor, OIt
     OInternalExecutionPlan result = planner.createExecutionPlan(ctx, enableProfiling);
     result.setStatement(originalStatement);
     return result;
-  }
-
-  /**
-   * Accept the visitor. *
-   */
-  public Object jjtAccept(OrientSqlVisitor visitor, Object data) {
-    return visitor.visit(this, data);
   }
 
   // ------------------------------------------------------------------

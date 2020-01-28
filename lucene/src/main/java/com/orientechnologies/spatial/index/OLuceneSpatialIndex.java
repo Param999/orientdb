@@ -1,17 +1,14 @@
-/**
+/*
  * Copyright 2010-2016 OrientDB LTD (http://orientdb.com)
  * <p>
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  * <p>
  * http://www.apache.org/licenses/LICENSE-2.0
  * <p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS"
+ * BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
  * <p>
  * For more information: http://www.orientdb.com
  */
@@ -20,10 +17,8 @@ package com.orientechnologies.spatial.index;
 import com.orientechnologies.lucene.index.OLuceneIndexNotUnique;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.exception.OInvalidIndexEngineIdException;
-import com.orientechnologies.orient.core.index.engine.OBaseIndexEngine;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedStorage;
-import com.orientechnologies.orient.core.storage.impl.local.OIndexEngineCallback;
 import com.orientechnologies.orient.core.tx.OTransactionIndexChanges;
 import com.orientechnologies.orient.core.tx.OTransactionIndexChangesPerKey;
 import com.orientechnologies.spatial.engine.OLuceneSpatialIndexContainer;
@@ -35,11 +30,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 public class OLuceneSpatialIndex extends OLuceneIndexNotUnique {
 
-  OShapeFactory shapeFactory = OShapeFactory.INSTANCE;
+  private final OShapeFactory shapeFactory = OShapeFactory.INSTANCE;
 
   public OLuceneSpatialIndex(String name, String typeId, String algorithm, int version, OAbstractPaginatedStorage storage,
       String valueContainerAlgorithm, ODocument metadata, final int binaryFormatVersion) {
@@ -60,17 +54,13 @@ public class OLuceneSpatialIndex extends OLuceneIndexNotUnique {
       final OTransactionIndexChangesPerKey changes) {
 
     try {
-      return storage.callIndexEngine(false, false, indexId,
-          new OIndexEngineCallback<Iterable<OTransactionIndexChangesPerKey.OTransactionIndexEntry>>() {
-            @Override
-            public Iterable<OTransactionIndexChangesPerKey.OTransactionIndexEntry> callEngine(OBaseIndexEngine engine) {
-              if (((OLuceneSpatialIndexContainer) engine).isLegacy()) {
-                return OLuceneSpatialIndex.super.interpretTxKeyChanges(changes);
-              } else {
-                return interpretAsSpatial(changes.entries);
-              }
-            }
-          });
+      return storage.callIndexEngine(false, false, indexId, engine -> {
+        if (((OLuceneSpatialIndexContainer) engine).isLegacy()) {
+          return OLuceneSpatialIndex.super.interpretTxKeyChanges(changes);
+        } else {
+          return interpretAsSpatial(changes.entries);
+        }
+      });
     } catch (OInvalidIndexEngineIdException e) {
       e.printStackTrace();
     }
@@ -98,13 +88,13 @@ public class OLuceneSpatialIndex extends OLuceneIndexNotUnique {
     return key;
   }
 
-  protected Iterable<OTransactionIndexChangesPerKey.OTransactionIndexEntry> interpretAsSpatial(
+  private static Iterable<OTransactionIndexChangesPerKey.OTransactionIndexEntry> interpretAsSpatial(
       List<OTransactionIndexChangesPerKey.OTransactionIndexEntry> entries) {
     // 1. Handle common fast paths.
 
-    List<OTransactionIndexChangesPerKey.OTransactionIndexEntry> newChanges = new ArrayList<OTransactionIndexChangesPerKey.OTransactionIndexEntry>();
+    List<OTransactionIndexChangesPerKey.OTransactionIndexEntry> newChanges = new ArrayList<>();
 
-    Map<OIdentifiable, Integer> counters = new LinkedHashMap<OIdentifiable, Integer>();
+    Map<OIdentifiable, Integer> counters = new LinkedHashMap<>();
 
     for (OTransactionIndexChangesPerKey.OTransactionIndexEntry entry : entries) {
 
@@ -125,9 +115,9 @@ public class OLuceneSpatialIndex extends OLuceneIndexNotUnique {
       counters.put(entry.value, counter);
     }
 
-    Set<OIdentifiable> oIdentifiables = counters.keySet();
-    for (OIdentifiable oIdentifiable : oIdentifiables) {
-      switch (counters.get(oIdentifiable)) {
+    for (Map.Entry<OIdentifiable, Integer> entry : counters.entrySet()) {
+      OIdentifiable oIdentifiable = entry.getKey();
+      switch (entry.getValue()) {
       case 1:
 
         newChanges

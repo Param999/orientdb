@@ -55,9 +55,9 @@ public class OServerCommandPostDatabase extends OServerCommandAuthenticatedServe
 
   @Override
   public boolean execute(final OHttpRequest iRequest, OHttpResponse iResponse) throws Exception {
-    String[] urlParts = checkSyntax(iRequest.url, 3, "Syntax error: database/<db>/<type>");
+    String[] urlParts = checkSyntax(iRequest.getUrl(), 3, "Syntax error: database/<db>/<type>");
 
-    iRequest.data.commandInfo = "Create database";
+    iRequest.getData().commandInfo = "Create database";
 
     final String databaseName = urlParts[1];
     final String storageMode = urlParts[2];
@@ -240,10 +240,10 @@ public class OServerCommandPostDatabase extends OServerCommandAuthenticatedServe
       json.endCollection(1, true);
     }
 
-    final Set<OIndex<?>> indexes = cls.getIndexes();
+    final Set<OIndex> indexes = cls.getIndexes();
     if (!indexes.isEmpty()) {
       json.beginCollection(3, true, "indexes");
-      for (final OIndex<?> index : indexes) {
+      for (final OIndex index : indexes) {
         json.beginObject(4, true, null);
         json.writeAttribute(4, true, "name", index.getName());
         json.writeAttribute(4, true, "type", index.getType());

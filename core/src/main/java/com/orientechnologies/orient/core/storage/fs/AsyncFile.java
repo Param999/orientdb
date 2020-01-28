@@ -147,6 +147,7 @@ public final class AsyncFile implements OFile {
 
       checkForClose();
       checkPosition(offset);
+      checkPosition(offset + buffer.limit() - 1);
 
       int written = 0;
       do {
@@ -172,14 +173,15 @@ public final class AsyncFile implements OFile {
     final AsyncIOResult asyncIOResult = new AsyncIOResult(latch);
 
     for (final ORawPair<Long, ByteBuffer> pair : buffers) {
-      final ByteBuffer byteBuffer = pair.getSecond();
+      final ByteBuffer byteBuffer = pair.second;
       byteBuffer.rewind();
       lock.sharedLock();
       try {
         checkForClose();
-        checkPosition(pair.getFirst());
+        checkPosition(pair.first);
+        checkPosition(pair.first + pair.second.limit() - 1);
 
-        final long position = pair.getFirst() + HEADER_SIZE;
+        final long position = pair.first + HEADER_SIZE;
         fileChannel.write(byteBuffer, position, latch, new WriteHandler(byteBuffer, asyncIOResult, position));
       } finally {
         lock.sharedUnlock();
@@ -268,7 +270,7 @@ public final class AsyncFile implements OFile {
       } else {
         final long sizeDiff = currentSize - currentCommittedSize;
         if (sizeDiff > 0) {
-          ONative.instance().fallocate(fd, allocatedPosition + HEADER_SIZE, sizeDiff);
+          ONative.instance().fallocate(fd, currentCommittedSize + HEADER_SIZE, sizeDiff);
         }
       }
 
@@ -409,7 +411,6 @@ public final class AsyncFile implements OFile {
   }
 
   private final class WriteHandler implements CompletionHandler<Integer, CountDownLatch> {
-    private       int           written;
     private final ByteBuffer    byteBuffer;
     private final AsyncIOResult ioResult;
     private final long          position;
@@ -422,21 +423,16 @@ public final class AsyncFile implements OFile {
 
     @Override
     public void completed(Integer result, CountDownLatch attachment) {
-      written += result;
-
-      if (written < byteBuffer.limit()) {
+      if (byteBuffer.remaining() > 0) {
         lock.sharedLock();
         try {
           checkForClose();
 
-          byteBuffer.position(written);
-          fileChannel.write(byteBuffer, position + written, attachment, this);
+          fileChannel.write(byteBuffer, position + byteBuffer.position(), attachment, this);
         } finally {
           lock.sharedUnlock();
         }
       } else {
-        assert written == byteBuffer.limit();
-
         dirtyCounter.incrementAndGet();
         attachment.countDown();
       }

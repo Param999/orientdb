@@ -23,18 +23,21 @@ package com.orientechnologies.orient.core.storage.impl.local.paginated.wal;
 import com.orientechnologies.orient.core.storage.impl.local.OCheckpointRequestListener;
 import com.orientechnologies.orient.core.storage.impl.local.OLowDiskSpaceListener;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.atomicoperations.OAtomicOperationMetadata;
-import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.cas.OWriteableWALRecord;
+import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.common.WriteableWALRecord;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * @author Andrey Lomakin (a.lomakin-at-orientdb.com)
  * @since 6/25/14
  */
 public class OMemoryWriteAheadLog extends OAbstractWriteAheadLog {
+  private final AtomicLong nextPosition = new AtomicLong();
+
   @Override
   public OLogSequenceNumber begin() {
     throw new UnsupportedOperationException("Operation not supported for in memory storage.");
@@ -42,7 +45,7 @@ public class OMemoryWriteAheadLog extends OAbstractWriteAheadLog {
 
   @Override
   public OLogSequenceNumber end() {
-    return new OLogSequenceNumber(-1,-1);
+    return new OLogSequenceNumber(-1, -1);
   }
 
   @Override
@@ -61,10 +64,9 @@ public class OMemoryWriteAheadLog extends OAbstractWriteAheadLog {
   }
 
   @Override
-  public OLogSequenceNumber log(OWriteableWALRecord record) throws IOException {
-    return new OLogSequenceNumber(Long.MAX_VALUE, Long.MAX_VALUE);
+  public OLogSequenceNumber log(WriteableWALRecord record) {
+    return new OLogSequenceNumber(0, nextPosition.incrementAndGet());
   }
-
 
   @Override
   public void close() throws IOException {
@@ -79,12 +81,12 @@ public class OMemoryWriteAheadLog extends OAbstractWriteAheadLog {
   }
 
   @Override
-  public List<OWriteableWALRecord> read(OLogSequenceNumber lsn, int limit) throws IOException {
+  public List<WriteableWALRecord> read(OLogSequenceNumber lsn, int limit) throws IOException {
     throw new UnsupportedOperationException("Operation not supported for in memory storage.");
   }
 
   @Override
-  public List<OWriteableWALRecord> next(OLogSequenceNumber lsn, int limit) throws IOException {
+  public List<WriteableWALRecord> next(OLogSequenceNumber lsn, int limit) throws IOException {
     throw new UnsupportedOperationException("Operation not supported for in memory storage.");
   }
 

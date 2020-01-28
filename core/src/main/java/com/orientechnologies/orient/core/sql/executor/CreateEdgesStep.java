@@ -14,6 +14,7 @@ import com.orientechnologies.orient.core.sql.parser.OBatch;
 import com.orientechnologies.orient.core.sql.parser.OIdentifier;
 
 import java.util.*;
+import java.util.stream.Stream;
 
 /**
  * Created by luigidellaquila on 28/11/16.
@@ -30,14 +31,14 @@ public class CreateEdgesStep extends AbstractExecutionStep {
   private final OBatch      batch;
 
   //operation stuff
-  Iterator fromIter;
-  Iterator toIterator;
-  OVertex  currentFrom;
-  OVertex  currentTo;
-  OEdge    edgeToUpdate;//for upsert
-  boolean  finished = false;
-  List     toList   = new ArrayList<>();
-  private OIndex<?> uniqueIndex;
+  private Iterator fromIter;
+  private Iterator toIterator;
+  private OVertex  currentFrom;
+  private OVertex  currentTo;
+  private OEdge    edgeToUpdate;//for upsert
+  private boolean  finished = false;
+  private List     toList   = new ArrayList<>();
+  private OIndex   uniqueIndex;
 
   private boolean inited = false;
 
@@ -61,7 +62,7 @@ public class CreateEdgesStep extends AbstractExecutionStep {
     getPrev().ifPresent(x -> x.syncPull(ctx, nRecords));
     init();
     return new OResultSet() {
-      int currentBatch = 0;
+      private int currentBatch = 0;
 
       @Override
       public boolean hasNext() {
@@ -130,12 +131,18 @@ public class CreateEdgesStep extends AbstractExecutionStep {
     } else if (!(fromValues instanceof Iterator)) {
       fromValues = Collections.singleton(fromValues).iterator();
     }
+    if (fromValues instanceof OInternalResultSet) {
+      fromValues = ((OInternalResultSet) fromValues).copy();
+    }
 
     Object toValues = ctx.getVariable(toAlias.getStringValue());
     if (toValues instanceof Iterable && !(toValues instanceof OIdentifiable)) {
       toValues = ((Iterable) toValues).iterator();
     } else if (!(toValues instanceof Iterator)) {
       toValues = Collections.singleton(toValues).iterator();
+    }
+    if (toValues instanceof OInternalResultSet) {
+      toValues = ((OInternalResultSet) toValues).copy();
     }
 
     fromIter = (Iterator) fromValues;
@@ -222,13 +229,15 @@ public class CreateEdgesStep extends AbstractExecutionStep {
 
   private OEdge getExistingEdge(OVertex currentFrom, OVertex currentTo) {
     Object key = uniqueIndex.getDefinition().createValue(currentFrom.getIdentity(), currentTo.getIdentity());
-    Object result = uniqueIndex.get(key);
-    if (result instanceof ORID) {
-      result = ((ORID) result).getRecord();
+
+    final Iterator<ORID> iterator;
+    try (Stream<ORID> stream = uniqueIndex.getInternal().getRids(key)) {
+      iterator = stream.iterator();
+      if (iterator.hasNext()) {
+        return iterator.next().getRecord();
+      }
     }
-    if (result instanceof OElement) {
-      return ((OElement) result).asEdge().get();
-    }
+
     return null;
   }
 
@@ -253,7 +262,8 @@ public class CreateEdgesStep extends AbstractExecutionStep {
       return ((OElement) currentFrom).asVertex()
           .orElseThrow(() -> new OCommandExecutionException("Invalid vertex for edge creation: " + from.toString()));
     }
-    throw new OCommandExecutionException("Invalid vertex for edge creation: " + (currentFrom == null ? "null" : currentFrom.toString()));
+    throw new OCommandExecutionException(
+        "Invalid vertex for edge creation: " + (currentFrom == null ? "null" : currentFrom.toString()));
   }
 
   @Override

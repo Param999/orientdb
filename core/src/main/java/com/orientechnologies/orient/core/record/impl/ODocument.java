@@ -60,6 +60,8 @@ import java.util.Map.Entry;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static com.orientechnologies.orient.core.config.OGlobalConfiguration.DB_CUSTOM_SUPPORT;
+
 /**
  * Document representation to handle values dynamically. Can be used in schema-less, schema-mixed and schema-full modes. Fields can
  * be added at run-time. Instances can be reused across calls by using the reset() before to re-use.
@@ -503,6 +505,13 @@ public class ODocument extends ORecordAbstract
       }
     }
 
+    if (fieldType == OType.CUSTOM) {
+      if (!DB_CUSTOM_SUPPORT.getValueAsBoolean()) {
+        throw new ODatabaseException(String.format(
+            "OType CUSTOM used by serializable types, for value  '%s' is not enabled, set `db.custom.support` to true for enable it",
+            iPropertyValue));
+      }
+    }
     if (oldType != fieldType && oldType != null) {
       // can be made in a better way, but "keeping type" issue should be solved before
       if (iPropertyValue == null || fieldType != null || oldType != OType.getTypeByValue(iPropertyValue))
@@ -1431,6 +1440,7 @@ public class ODocument extends ORecordAbstract
     if (oldValue instanceof ORidBag) {
       final ORidBag ridBag = (ORidBag) oldValue;
       ridBag.setOwner(null);
+      ridBag.setRecordAndField(recordId, iFieldName);
     } else if (oldValue instanceof ODocument) {
       ((ODocument) oldValue).removeOwner(this);
     }
@@ -1457,6 +1467,15 @@ public class ODocument extends ORecordAbstract
         final ORidBag ridBag = (ORidBag) iPropertyValue;
         ridBag.setOwner(null); // in order to avoid IllegalStateException when ridBag changes the owner (ODocument.merge)
         ridBag.setOwner(this);
+        ridBag.setRecordAndField(recordId, iFieldName);
+      }
+    }
+
+    if (fieldType == OType.CUSTOM) {
+      if (!DB_CUSTOM_SUPPORT.getValueAsBoolean()) {
+        throw new ODatabaseException(String.format(
+            "OType CUSTOM used by serializable types, for value  '%s' is not enabled, set `db.custom.support` to true for enable it",
+            iPropertyValue));
       }
     }
 
@@ -2073,6 +2092,13 @@ public class ODocument extends ORecordAbstract
     if (iFieldType != null) {
       if (fields == null)
         fields = ordered ? new LinkedHashMap<>() : new HashMap<>();
+
+      if (iFieldType == OType.CUSTOM) {
+        if (!DB_CUSTOM_SUPPORT.getValueAsBoolean()) {
+          throw new ODatabaseException(String
+              .format("OType CUSTOM used by serializable types is not enabled, set `db.custom.support` to true for enable it"));
+        }
+      }
       // SET THE FORCED TYPE
       ODocumentEntry entry = getOrCreate(iFieldName);
       if (entry.type != iFieldType)
@@ -2598,6 +2624,9 @@ public class ODocument extends ORecordAbstract
     entry.value = iFieldValue;
     entry.type = iFieldType;
     entry.enableTracking(this);
+    if (iFieldValue instanceof ORidBag) {
+      ((ORidBag) iFieldValue).setRecordAndField(recordId, iFieldName);
+    }
     if (iFieldValue instanceof OIdentifiable && !((OIdentifiable) iFieldValue).getIdentity().isPersistent())
       track((OIdentifiable) iFieldValue);
   }
@@ -2642,6 +2671,7 @@ public class ODocument extends ORecordAbstract
           if (type == OType.LINKBAG && entry.value != null && !(entry.value instanceof ORidBag)
               && entry.value instanceof Collection) {
             ORidBag newValue = new ORidBag();
+            newValue.setRecordAndField(recordId, prop.getName());
             for (Object o : ((Collection) entry.value)) {
               if (!(o instanceof OIdentifiable)) {
                 throw new OValidationException("Invalid value in ridbag: " + o);
@@ -2798,6 +2828,9 @@ public class ODocument extends ORecordAbstract
       ODocumentEntry entry = fieldEntry.getValue();
       final Object fieldValue = entry.value;
       if (fieldValue instanceof ORidBag) {
+        if (isEmbedded()) {
+          throw new ODatabaseException("RidBag are supported only at document root");
+        }
         ((ORidBag) fieldValue).checkAndConvert();
       }
       if (!(fieldValue instanceof Collection<?>) && !(fieldValue instanceof Map<?, ?>) && !(fieldValue instanceof ODocument))
@@ -2861,6 +2894,7 @@ public class ODocument extends ORecordAbstract
         if (fieldValue instanceof Collection<?>) {
           ORidBag bag = new ORidBag();
           bag.setOwner(this);
+          bag.setRecordAndField(recordId, fieldEntry.getKey());
           bag.addAll((Collection<OIdentifiable>) fieldValue);
           newValue = bag;
         }
@@ -2920,6 +2954,7 @@ public class ODocument extends ORecordAbstract
   private void fillTrackedCollection(Collection<Object> dest, ORecordElement parent, Collection<Object> source) {
     for (Object cur : source) {
       if (cur instanceof ODocument) {
+        ((ODocument) cur).addOwner((ORecordElement) dest);
         ((ODocument) cur).convertAllMultiValuesToTrackedVersions();
         ((ODocument) cur).clearTrackData();
       } else if (cur instanceof List) {
@@ -2934,6 +2969,8 @@ public class ODocument extends ORecordAbstract
         OTrackedMap<Object> newMap = new OTrackedMap<>(parent);
         fillTrackedMap(newMap, newMap, (Map<Object, Object>) cur);
         cur = newMap;
+      } else if (cur instanceof ORidBag) {
+        throw new ODatabaseException("RidBag are supported only at document root");
       }
       dest.add(cur);
     }
@@ -2957,6 +2994,8 @@ public class ODocument extends ORecordAbstract
         OTrackedMap<Object> newMap = new OTrackedMap<>(parent);
         fillTrackedMap(newMap, newMap, (Map<Object, Object>) value);
         value = newMap;
+      } else if (value instanceof ORidBag) {
+        throw new ODatabaseException("RidBag are supported only at document root");
       }
       dest.put(cur.getKey(), value);
     }

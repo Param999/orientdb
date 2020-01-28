@@ -1,6 +1,5 @@
 package com.orientechnologies.orient.server.security;
 
-import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.db.ODatabaseSession;
 import com.orientechnologies.orient.core.db.ODatabaseType;
 import com.orientechnologies.orient.core.db.OrientDB;
@@ -12,7 +11,10 @@ import com.orientechnologies.orient.core.record.OElement;
 import com.orientechnologies.orient.core.sql.executor.OResult;
 import com.orientechnologies.orient.core.sql.executor.OResultSet;
 import com.orientechnologies.orient.server.OServer;
-import org.junit.*;
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
 
 import java.io.IOException;
 
@@ -26,8 +28,6 @@ public class ORemoteSecurityTests {
   @Before
   public void before() throws ClassNotFoundException, InstantiationException, IllegalAccessException, IOException {
     server = OServer.startFromClasspathConfig("abstract-orientdb-server-config.xml");
-    OGlobalConfiguration.INDEX_ALLOW_MANUAL_INDEXES.setValue(true);
-
     orient = new OrientDB("remote:localhost", "root", "root", OrientDBConfig.defaultConfig());
     orient.create(DB_NAME, ODatabaseType.MEMORY);
     this.db = orient.open(DB_NAME, "admin", "admin");
@@ -384,8 +384,6 @@ public class ORemoteSecurityTests {
     }
   }
 
-
-
   @Test
   public void testReadHiddenColumn() {
 
@@ -406,7 +404,6 @@ public class ORemoteSecurityTests {
     }
 
   }
-
 
   @Test
   public void testUpdateHiddenColumn() {
@@ -429,7 +426,7 @@ public class ORemoteSecurityTests {
       try {
         doc.save();
         Assert.fail();
-      } catch (Exception e){
+      } catch (Exception e) {
 
       }
 

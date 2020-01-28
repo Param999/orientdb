@@ -19,9 +19,11 @@
  */
 package com.orientechnologies.orient.core.metadata.security;
 
-import com.orientechnologies.orient.core.command.OBasicCommandContext;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
-import com.orientechnologies.orient.core.db.*;
+import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
+import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
+import com.orientechnologies.orient.core.db.ODatabaseSession;
+import com.orientechnologies.orient.core.db.OScenarioThreadLocal;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 import com.orientechnologies.orient.core.db.record.OClassTrigger;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
@@ -32,20 +34,21 @@ import com.orientechnologies.orient.core.index.OIndex;
 import com.orientechnologies.orient.core.index.ONullOutputListener;
 import com.orientechnologies.orient.core.metadata.OMetadataDefault;
 import com.orientechnologies.orient.core.metadata.function.OFunction;
-import com.orientechnologies.orient.core.metadata.schema.*;
+import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.metadata.schema.OClass.INDEX_TYPE;
+import com.orientechnologies.orient.core.metadata.schema.OClassImpl;
+import com.orientechnologies.orient.core.metadata.schema.OProperty;
+import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.metadata.security.OSecurityUser.STATUSES;
 import com.orientechnologies.orient.core.metadata.sequence.OSequence;
 import com.orientechnologies.orient.core.query.live.OLiveQueryHookV2;
 import com.orientechnologies.orient.core.record.OElement;
 import com.orientechnologies.orient.core.record.ORecord;
 import com.orientechnologies.orient.core.record.impl.ODocument;
-import com.orientechnologies.orient.core.sql.OSQLEngine;
 import com.orientechnologies.orient.core.sql.executor.OResult;
 import com.orientechnologies.orient.core.sql.executor.OResultInternal;
 import com.orientechnologies.orient.core.sql.executor.OResultSet;
 import com.orientechnologies.orient.core.sql.parser.OBooleanExpression;
-import com.orientechnologies.orient.core.sql.parser.OSecurityResourceSegment;
 import com.orientechnologies.orient.core.storage.OStorageProxy;
 
 import java.util.*;
@@ -427,6 +430,7 @@ public class OSecurityShared implements OSecurityInternal {
     if (role instanceof ORole) {
       ((ORole) role).reload();
     }
+    updateAllFilteredProperties((ODatabaseDocumentInternal) session);
   }
 
   private void validatePolicyWithIndexes(ODatabaseSession session, String resource) throws IllegalArgumentException {
@@ -442,7 +446,7 @@ public class OSecurityShared implements OSecurityInternal {
       allClasses.addAll(clazz.getAllSubclasses());
       allClasses.addAll(clazz.getAllSuperClasses());
       for (OClass c : allClasses) {
-        for (OIndex<?> index : c.getIndexes()) {
+        for (OIndex index : c.getIndexes()) {
           List<String> indexFields = index.getDefinition().getFields();
           if (indexFields.size() > 1 && indexFields.contains(((OSecurityResourceProperty) res).getPropertyName())) {
             throw new IllegalArgumentException("Cannot bind security policy on " + resource + " because of existing composite indexes: " + index.getName());
@@ -456,8 +460,9 @@ public class OSecurityShared implements OSecurityInternal {
   public OSecurityPolicy createSecurityPolicy(ODatabaseSession session, String name) {
     OElement elem = session.newElement(OSecurityPolicy.class.getSimpleName());
     elem.setProperty("name", name);
-    session.save(elem);
-    return new OSecurityPolicy(elem);
+    OSecurityPolicy policy = new OSecurityPolicy(elem);
+    saveSecurityPolicy(session, policy);
+    return policy;
   }
 
   @Override
@@ -473,7 +478,7 @@ public class OSecurityShared implements OSecurityInternal {
 
   @Override
   public void saveSecurityPolicy(ODatabaseSession session, OSecurityPolicy policy) {
-    session.save(policy.getElement());
+    session.save(policy.getElement(), OSecurityPolicy.class.getSimpleName().toLowerCase(Locale.ENGLISH));
   }
 
   @Override
@@ -495,6 +500,7 @@ public class OSecurityShared implements OSecurityInternal {
     policies.remove(resource);
     roleDoc.save();
     role.reload();
+    updateAllFilteredProperties((ODatabaseDocumentInternal) session);
   }
 
   private String normalizeSecurityResource(ODatabaseSession session, String resource) {
@@ -556,7 +562,7 @@ public class OSecurityShared implements OSecurityInternal {
     readerRole.addRule(ORule.ResourceGeneric.CLUSTER, "orole", ORole.PERMISSION_NONE);
     readerRole.addRule(ORule.ResourceGeneric.CLUSTER, "ouser", ORole.PERMISSION_NONE);
     writerRole.addRule(ORule.ResourceGeneric.CLASS, null, ORole.PERMISSION_ALL);
-    writerRole.addRule(ORule.ResourceGeneric.CLASS, "OUser", ORole.PERMISSION_NONE);
+    writerRole.addRule(ORule.ResourceGeneric.CLASS, "OUser", ORole.PERMISSION_READ);
     writerRole.addRule(ORule.ResourceGeneric.CLUSTER, null, ORole.PERMISSION_ALL);
     writerRole.addRule(ORule.ResourceGeneric.COMMAND, null, ORole.PERMISSION_ALL);
     writerRole.addRule(ORule.ResourceGeneric.RECORD_HOOK, null, ORole.PERMISSION_ALL);
@@ -564,6 +570,7 @@ public class OSecurityShared implements OSecurityInternal {
     writerRole.addRule(ORule.ResourceGeneric.CLASS, OSequence.CLASS_NAME, ORole.PERMISSION_READ);
     writerRole.addRule(ORule.ResourceGeneric.CLASS, "OTriggered", ORole.PERMISSION_READ);
     writerRole.addRule(ORule.ResourceGeneric.CLASS, "OSchedule", ORole.PERMISSION_READ);
+    writerRole.addRule(ORule.ResourceGeneric.CLASS, OSecurityResource.class.getSimpleName(), ORole.PERMISSION_READ);
     writerRole.addRule(ORule.ResourceGeneric.SYSTEM_CLUSTERS, null, ORole.PERMISSION_NONE);
     writerRole.save();
 
@@ -868,7 +875,7 @@ public class OSecurityShared implements OSecurityInternal {
       return Collections.emptySet();
     }
     for (String prop : props) {
-      OBooleanExpression predicate = OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class." + schemaType.getName() + "." + prop, OSecurityPolicy.Scope.READ);
+      OBooleanExpression predicate = OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class.`" + schemaType.getName() + "`.`" + prop + "`", OSecurityPolicy.Scope.READ);
       if (!OSecurityEngine.evaluateSecuirtyPolicyPredicate(session, predicate, document)) {
         result.add(prop);
       }
@@ -892,17 +899,22 @@ public class OSecurityShared implements OSecurityInternal {
     }
 
     if (document.getIdentity().isNew()) {
-      OBooleanExpression predicate = OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class." + clazz.getName() + "." + propertyName, OSecurityPolicy.Scope.CREATE);
+      OBooleanExpression predicate = OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class.`" + clazz.getName() + "`.`" + propertyName + "`", OSecurityPolicy.Scope.CREATE);
       return OSecurityEngine.evaluateSecuirtyPolicyPredicate(session, predicate, document);
     } else {
 
-      OBooleanExpression beforePredicate = OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class." + clazz.getName() + "." + propertyName, OSecurityPolicy.Scope.BEFORE_UPDATE);
+      OBooleanExpression readPredicate = OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class.`" + clazz.getName() + "`.`" + propertyName + "`", OSecurityPolicy.Scope.READ);
+      if (!OSecurityEngine.evaluateSecuirtyPolicyPredicate(session, readPredicate, document)) {
+        return false;
+      }
+
+      OBooleanExpression beforePredicate = OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class.`" + clazz.getName() + "`.`" + propertyName + "`", OSecurityPolicy.Scope.BEFORE_UPDATE);
       OResultInternal originalRecord = calculateOriginalValue(document);
       if (!OSecurityEngine.evaluateSecuirtyPolicyPredicate(session, beforePredicate, originalRecord)) {
         return false;
       }
 
-      OBooleanExpression predicate = OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class." + clazz.getName() + "." + propertyName, OSecurityPolicy.Scope.AFTER_UPDATE);
+      OBooleanExpression predicate = OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class.`" + clazz.getName() + "`.`" + propertyName + "`", OSecurityPolicy.Scope.AFTER_UPDATE);
       return OSecurityEngine.evaluateSecuirtyPolicyPredicate(session, predicate, document);
     }
 
@@ -917,7 +929,7 @@ public class OSecurityShared implements OSecurityInternal {
 
     if (record instanceof OElement) {
       String className = record instanceof ODocument ? ((ODocument) record).getClassName() : ((OElement) record).getSchemaType().map(x -> x.getName()).orElse(null);
-      OBooleanExpression predicate = className == null ? null : OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class." + className, OSecurityPolicy.Scope.CREATE);
+      OBooleanExpression predicate = className == null ? null : OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class.`" + className + "`", OSecurityPolicy.Scope.CREATE);
       return OSecurityEngine.evaluateSecuirtyPolicyPredicate(session, predicate, record);
     }
     return true;
@@ -941,7 +953,7 @@ public class OSecurityShared implements OSecurityInternal {
 
     if (record instanceof OElement) {
       OBooleanExpression predicate = ((OElement) record).getSchemaType()
-              .map(x -> OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class." + x.getName(), OSecurityPolicy.Scope.READ)).orElse(null);
+              .map(x -> OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class.`" + x.getName() + "`", OSecurityPolicy.Scope.READ)).orElse(null);
       return OSecurityEngine.evaluateSecuirtyPolicyPredicate(session, predicate, record);
     }
     return true;
@@ -955,14 +967,14 @@ public class OSecurityShared implements OSecurityInternal {
     }
     if (record instanceof OElement) {
       OBooleanExpression beforePredicate = ((OElement) record).getSchemaType()
-              .map(x -> OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class." + x.getName(), OSecurityPolicy.Scope.BEFORE_UPDATE)).orElse(null);
+              .map(x -> OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class.`" + x.getName() + "`", OSecurityPolicy.Scope.BEFORE_UPDATE)).orElse(null);
       OResultInternal originalRecord = calculateOriginalValue(record);
       if (!OSecurityEngine.evaluateSecuirtyPolicyPredicate(session, beforePredicate, originalRecord)) {
         return false;
       }
 
       OBooleanExpression predicate = ((OElement) record).getSchemaType()
-              .map(x -> OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class." + x.getName(), OSecurityPolicy.Scope.AFTER_UPDATE)).orElse(null);
+              .map(x -> OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class.`" + x.getName() + "`", OSecurityPolicy.Scope.AFTER_UPDATE)).orElse(null);
       return OSecurityEngine.evaluateSecuirtyPolicyPredicate(session, predicate, record);
     }
     return true;
@@ -980,7 +992,7 @@ public class OSecurityShared implements OSecurityInternal {
     }
     if (record instanceof OElement) {
       OBooleanExpression predicate = ((OElement) record).getSchemaType()
-              .map(x -> OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class." + x.getName(), OSecurityPolicy.Scope.DELETE)).orElse(null);
+              .map(x -> OSecurityEngine.getPredicateForSecurityResource(session, this, "database.class.`" + x.getName() + "`", OSecurityPolicy.Scope.DELETE)).orElse(null);
       return OSecurityEngine.evaluateSecuirtyPolicyPredicate(session, predicate, record);
     }
     return true;
@@ -1048,40 +1060,47 @@ public class OSecurityShared implements OSecurityInternal {
 
   protected void updateAllFilteredProperties(ODatabaseDocumentInternal session) {
     try {
-      Set<OSecurityResourceProperty> result = new HashSet<>();
-//      session.getSharedContext().getOrientDB().executeNoAuthorization(session.getName(), (db -> {
-
-      if (session.getClass("ORole") == null) {
-        return;
+      Set<OSecurityResourceProperty> result;
+      if (session.getUser() == null) {
+        result = calculateAllFilteredProperties(session);
+      } else {
+        result = session.getSharedContext().getOrientDB()
+                .executeNoAuthorization(session.getName(), (db -> calculateAllFilteredProperties(db))).get();
       }
-      OResultSet rs = session.query("select policies from ORole");
-      while (rs.hasNext()) {
-        OResult item = rs.next();
-        Map<String, OIdentifiable> policies = item.getProperty("policies");
-        if (policies != null) {
-          for (Map.Entry<String, OIdentifiable> policyEntry : policies.entrySet()) {
-            try {
-              OSecurityResource res = OSecurityResource.getInstance(policyEntry.getKey());
-              if (res instanceof OSecurityResourceProperty) {
-                OSecurityPolicy policy = new OSecurityPolicy(policyEntry.getValue().getRecord());
-                String readRule = policy.getReadRule();
-                if (readRule != null && !readRule.trim().equalsIgnoreCase("true")) {
-                  result.add((OSecurityResourceProperty) res);
-                }
-              }
-            } catch (Exception e) {
-            }
-          }
-        }
-      }
-      rs.close();
-//        return null;
-//      })).get();
       synchronized (this) {
         filteredProperties = result;
       }
     } catch (Exception e) {
       e.printStackTrace();
     }
+  }
+
+  protected Set<OSecurityResourceProperty> calculateAllFilteredProperties(ODatabaseSession session) {
+    Set<OSecurityResourceProperty> result = new HashSet<>();
+    if (session.getClass("ORole") == null) {
+      return Collections.emptySet();
+    }
+    OResultSet rs = session.query("select policies from ORole");
+    while (rs.hasNext()) {
+      OResult item = rs.next();
+      Map<String, OIdentifiable> policies = item.getProperty("policies");
+      if (policies != null) {
+        for (Map.Entry<String, OIdentifiable> policyEntry : policies.entrySet()) {
+          try {
+            OSecurityResource res = OSecurityResource.getInstance(policyEntry.getKey());
+            if (res instanceof OSecurityResourceProperty) {
+              OSecurityPolicy policy = new OSecurityPolicy(policyEntry.getValue().getRecord());
+              String readRule = policy.getReadRule();
+              if (readRule != null && !readRule.trim().equalsIgnoreCase("true")) {
+                result.add((OSecurityResourceProperty) res);
+              }
+            }
+          } catch (Exception e) {
+          }
+        }
+      }
+    }
+    rs.close();
+    return result;
   }
 }

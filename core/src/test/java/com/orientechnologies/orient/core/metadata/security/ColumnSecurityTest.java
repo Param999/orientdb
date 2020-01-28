@@ -460,7 +460,6 @@ public class ColumnSecurityTest {
     }
   }
 
-
   @Test
   public void testReadHiddenColumn() {
 
@@ -480,7 +479,6 @@ public class ColumnSecurityTest {
       Assert.assertNull(item.getProperty("name"));
     }
   }
-
 
   @Test
   public void testUpdateHiddenColumn() {
@@ -504,7 +502,7 @@ public class ColumnSecurityTest {
       try {
         doc.save();
         Assert.fail();
-      } catch (Exception e){
+      } catch (Exception e) {
 
       }
 

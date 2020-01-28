@@ -112,9 +112,7 @@ public class ODirectMemoryAllocator implements ODirectMemoryAllocatorMXBean {
    *
    * @param size  Amount of memory to allocate
    * @param clear clears memory if needed
-   *
    * @return Pointer to allocated memory
-   *
    * @throws ODirectMemoryAllocationFailedException if it is impossible to allocate amount of direct memory of given size
    */
   public OPointer allocate(int size, int align, boolean clear) {
@@ -153,9 +151,11 @@ public class ODirectMemoryAllocator implements ODirectMemoryAllocatorMXBean {
     }
 
     final long ptr = pointer.getNativePointer();
-    MemoryIO.getInstance().freeMemory(ptr);
-    memoryConsumption.add(-pointer.getSize());
-    untrack(pointer);
+    if (ptr > 0) {
+      MemoryIO.getInstance().freeMemory(ptr);
+      memoryConsumption.add(-pointer.getSize());
+      untrack(pointer);
+    }
   }
 
   /**
@@ -260,7 +260,7 @@ public class ODirectMemoryAllocator implements ODirectMemoryAllocatorMXBean {
   private static class TrackedPointerReference extends WeakReference<OPointer> {
 
     public final int       id;
-    final        Exception stackTrace;
+    private final        Exception stackTrace;
 
     TrackedPointerReference(OPointer referent, ReferenceQueue<? super OPointer> q) {
       super(referent, q);

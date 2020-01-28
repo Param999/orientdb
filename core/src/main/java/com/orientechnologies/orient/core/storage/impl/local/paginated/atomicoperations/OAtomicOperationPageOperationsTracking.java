@@ -8,8 +8,7 @@ import com.orientechnologies.orient.core.storage.impl.local.paginated.base.ODura
 import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OLogSequenceNumber;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OOperationUnitId;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OWriteAheadLog;
-import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.cas.OWriteableWALRecord;
-import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.co.OComponentOperationRecord;
+import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.common.WriteableWALRecord;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.po.PageOperationRecord;
 import com.orientechnologies.orient.core.storage.index.sbtreebonsai.local.OBonsaiBucketPointer;
 
@@ -79,17 +78,15 @@ final class OAtomicOperationPageOperationsTracking implements OAtomicOperation {
 
     OLogSequenceNumber lastLSN = null;
     for (final PageOperationRecord pageOperationRecord : pageOperationRecords) {
-      if (writeAheadLog != null) {
-        pageOperationRecord.setOperationUnitId(operationUnitId);
-        pageOperationRecord.setFileId(cacheEntry.getFileId());
-        pageOperationRecord.setPageIndex(cacheEntry.getPageIndex());
+      pageOperationRecord.setOperationUnitId(operationUnitId);
+      pageOperationRecord.setFileId(cacheEntry.getFileId());
+      pageOperationRecord.setPageIndex(cacheEntry.getPageIndex());
 
-        final OLogSequenceNumber lsn = writeAheadLog.log(pageOperationRecord);
-        pageOperationRefs.add(lsn);
+      final OLogSequenceNumber lsn = writeAheadLog.log(pageOperationRecord);
+      pageOperationRefs.add(lsn);
 
-        sizeSerializedOperations += pageOperationRecord.serializedSize();
-        lastLSN = lsn;
-      }
+      sizeSerializedOperations += pageOperationRecord.serializedSize();
+      lastLSN = lsn;
 
       if (sizeSerializedOperations <= operationsCacheLimit) {
         pageOperationCache.add(pageOperationRecord);
@@ -110,11 +107,6 @@ final class OAtomicOperationPageOperationsTracking implements OAtomicOperation {
   @Override
   public OCacheEntry addPage(long fileId) throws IOException {
     return readCache.allocateNewPage(fileId, writeCache, null);
-  }
-
-  @Override
-  public void addComponentOperation(OComponentOperationRecord componentOperation) {
-    //do nothing at this stage
   }
 
   @Override
@@ -216,7 +208,7 @@ final class OAtomicOperationPageOperationsTracking implements OAtomicOperation {
           revertPageOperation(pageOperationRecord);
         }
       } else if (!pageOperationRefs.isEmpty()) {
-        final int chunkSize = 100;
+        final int chunkSize = 1_000;
         final List<PageOperationRecord> chunkToRevert = new ArrayList<>();
 
         int startIndex = pageOperationRefs.size() - chunkSize;
@@ -227,11 +219,11 @@ final class OAtomicOperationPageOperationsTracking implements OAtomicOperation {
         }
 
         while (true) {
-          List<OWriteableWALRecord> walRecords = writeAheadLog.read(pageOperationRefs.get(startIndex), chunkSize);
+          List<WriteableWALRecord> walRecords = writeAheadLog.read(pageOperationRefs.get(startIndex), chunkSize);
 
           int recordsRead = 0;
           while (true) {
-            for (final OWriteableWALRecord walRecord : walRecords) {
+            for (final WriteableWALRecord walRecord : walRecords) {
               final int index = recordsRead + startIndex;
 
               if (startIndex + recordsRead < endIndex) {
@@ -273,11 +265,7 @@ final class OAtomicOperationPageOperationsTracking implements OAtomicOperation {
       }
     }
 
-    if (writeAheadLog != null) {
-      return writeAheadLog.logAtomicOperationEndRecord(getOperationUnitId(), rollbackInProgress, this.startLSN, getMetadata());
-    }
-
-    return null;
+    return writeAheadLog.logAtomicOperationEndRecord(getOperationUnitId(), rollbackInProgress, this.startLSN, getMetadata());
   }
 
   private void revertPageOperation(PageOperationRecord pageOperationRecord) throws IOException {
@@ -287,16 +275,14 @@ final class OAtomicOperationPageOperationsTracking implements OAtomicOperation {
     try {
       pageOperationRecord.undo(cacheEntry);
 
-      if (writeAheadLog != null) {
-        final List<PageOperationRecord> rollbackOperationRecords = cacheEntry.getPageOperations();
-        for (final PageOperationRecord rollbackOperationRecord : rollbackOperationRecords) {
+      final List<PageOperationRecord> rollbackOperationRecords = cacheEntry.getPageOperations();
+      for (final PageOperationRecord rollbackOperationRecord : rollbackOperationRecords) {
 
-          rollbackOperationRecord.setOperationUnitId(operationUnitId);
-          rollbackOperationRecord.setFileId(cacheEntry.getFileId());
-          rollbackOperationRecord.setPageIndex(cacheEntry.getPageIndex());
+        rollbackOperationRecord.setOperationUnitId(operationUnitId);
+        rollbackOperationRecord.setFileId(cacheEntry.getFileId());
+        rollbackOperationRecord.setPageIndex(cacheEntry.getPageIndex());
 
-          lastLSN = writeAheadLog.log(rollbackOperationRecord);
-        }
+        lastLSN = writeAheadLog.log(rollbackOperationRecord);
       }
 
       if (lastLSN != null) {

@@ -21,6 +21,7 @@
 package com.orientechnologies.orient.core.db;
 
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
+import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.index.OIndex;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.metadata.schema.OType;
@@ -34,6 +35,7 @@ import java.util.HashSet;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.*;
+import java.util.stream.Stream;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -98,7 +100,7 @@ public class FreezeAndRecordInsertAtomicityTest {
         try {
           final ODatabaseDocumentInternal db = new ODatabaseDocumentTx(URL);
           db.open("admin", "admin");
-          final OIndex<?> index = db.getMetadata().getIndexManagerInternal().getIndex(db, "Person.name");
+          final OIndex index = db.getMetadata().getIndexManagerInternal().getIndex(db, "Person.name");
 
           for (int i1 = 0; i1 < ITERATIONS; ++i1)
             switch (random.nextInt(3)) {
@@ -115,8 +117,11 @@ public class FreezeAndRecordInsertAtomicityTest {
             case 2:
               db.freeze();
               try {
-                for (ODocument document : db.browseClass("Person"))
-                  assertEquals(document.getIdentity(), index.get(document.field("name")));
+                for (ODocument document : db.browseClass("Person")) {
+                  try (Stream<ORID> rids = index.getInternal().getRids(document.field("name"))) {
+                    assertEquals(document.getIdentity(), rids.findFirst().orElse(null));
+                  }
+                }
               } finally {
                 db.release();
               }

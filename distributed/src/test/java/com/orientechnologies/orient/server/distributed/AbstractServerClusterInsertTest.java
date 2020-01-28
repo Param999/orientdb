@@ -36,6 +36,8 @@ import org.junit.Assert;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Insert records concurrently against the cluster
@@ -46,7 +48,7 @@ public abstract class AbstractServerClusterInsertTest extends AbstractDistribute
   protected static   int             writerCount           = 5;
   protected          int             baseCount             = 0;
   protected          long            expected;
-  protected          OIndex<?>       idx;
+  protected          OIndex          idx;
   protected          int             maxRetries            = 5;
   protected          boolean         useTransactions       = false;
   protected          List<ServerRun> executeTestsOnServers = null;
@@ -192,16 +194,12 @@ public abstract class AbstractServerClusterInsertTest extends AbstractDistribute
       checkClusterStrategy(database);
 
       final OIndex index = database.getSharedContext().getIndexManager().getIndex(database, indexName);
-      final Object value = index.get(key);
-      Assert.assertNotNull(value);
-
-      if (value instanceof Collection) {
-        final Collection result = (Collection) value;
-        Assert.assertEquals(1, result.size());
-        Assert.assertTrue(result.contains(rid));
-      } else {
-        Assert.assertEquals(rid, value);
+      final List<ORID> rids;
+      try (Stream<ORID> stream = index.getInternal().getRids(key)) {
+        rids = stream.collect(Collectors.toList());
       }
+      Assert.assertEquals(1, rids.size());
+      Assert.assertTrue(rids.contains(rid));
     }
 
     protected ODocument loadRecord(ODatabaseDocument database, int i) {
@@ -525,13 +523,14 @@ public abstract class AbstractServerClusterInsertTest extends AbstractDistribute
             database.getMetadata().getIndexManagerInternal().getIndex(database, indexName));
 
         try {
-          final long indexSize = database.getMetadata().getIndexManagerInternal().getIndex(database, indexName).getSize();
+          final long indexSize = database.getMetadata().getIndexManagerInternal().getIndex(database, indexName).getInternal()
+              .size();
 
           result.put(server.serverId, indexSize);
 
           final OIndex index = (database).getMetadata().getIndexManagerInternal().getIndex(database, indexName);
 
-          Assert.assertEquals("Index count is different by index content", indexSize, index.getSize());
+          Assert.assertEquals("Index count is different by index content", indexSize, index.getInternal().size());
 
           if (indexSize != expected)
             printMissingIndexEntries(server, database);
@@ -579,9 +578,11 @@ public abstract class AbstractServerClusterInsertTest extends AbstractDistribute
 
           final OIndex index = database.getSharedContext().getIndexManager().getIndex(database, indexName);
 
-          if (index.get(key) == null) {
-            missingKeys++;
-            System.out.println("Missing key: " + key + " on server: " + server);
+          try (final Stream<ORID> rids = index.getInternal().getRids(key)) {
+            if (!rids.findAny().isPresent()) {
+              missingKeys++;
+              System.out.println("Missing key: " + key + " on server: " + server);
+            }
           }
         }
       }

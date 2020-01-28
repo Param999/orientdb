@@ -2,15 +2,18 @@ package com.orientechnologies.orient.distributed.impl.structural;
 
 import com.orientechnologies.orient.core.db.config.ONodeIdentity;
 import com.orientechnologies.orient.distributed.OrientDBDistributed;
-import com.orientechnologies.orient.distributed.impl.OPersistentOperationalLogV1;
 import com.orientechnologies.orient.distributed.impl.coordinator.OCoordinateMessagesFactory;
-import com.orientechnologies.orient.distributed.impl.coordinator.ODistributedChannel;
-import com.orientechnologies.orient.distributed.impl.coordinator.OOperationLog;
 import com.orientechnologies.orient.distributed.impl.coordinator.transaction.OSessionOperationId;
-import com.orientechnologies.orient.distributed.impl.structural.raft.OStructuralLeader;
+import com.orientechnologies.orient.distributed.impl.log.OLogId;
+import com.orientechnologies.orient.distributed.impl.log.OOperationLog;
+import com.orientechnologies.orient.distributed.impl.log.OPersistentOperationalLogV1;
 import com.orientechnologies.orient.distributed.impl.structural.raft.OStructuralFollower;
+import com.orientechnologies.orient.distributed.impl.structural.raft.OStructuralLeader;
+import com.orientechnologies.orient.distributed.impl.structural.submit.OStructuralSubmitRequest;
+import com.orientechnologies.orient.distributed.impl.structural.submit.OStructuralSubmitResponse;
 
-import java.util.concurrent.Executors;
+import java.util.Set;
+import java.util.concurrent.Future;
 
 public class OStructuralDistributedContext {
   private OStructuralSubmitContext submitContext;
@@ -19,11 +22,17 @@ public class OStructuralDistributedContext {
   private OStructuralLeader        leader;
   private OStructuralFollower      follower;
 
+  /**
+   * used in client->follower->leader communication pattern to guarantee that op N is executed AFTER op N-1 is ALREADY propagated to
+   * the slave eg. create database VS open database
+   */
+  private OSessionOperationId last;
+
   public OStructuralDistributedContext(OrientDBDistributed context) {
     this.context = context;
     initOpLog();
-    submitContext = new OStructuralSubmitContextImpl();
-    follower = new OStructuralFollower(Executors.newSingleThreadExecutor(), opLog, context);
+    submitContext = new OStructuralSubmitContextImpl(context);
+    follower = new OStructuralFollower(opLog, context.getNetworkManager(), context);
     leader = null;
   }
 
@@ -48,21 +57,26 @@ public class OStructuralDistributedContext {
     return follower;
   }
 
-  public synchronized void makeLeader(ONodeIdentity identity) {
+  public synchronized void makeLeader(ONodeIdentity identity, Set<ONodeIdentity> activeNodes) {
     if (leader == null) {
-      leader = new OStructuralLeader(Executors.newSingleThreadExecutor(), opLog, context);
+      leader = new OStructuralLeader(opLog, context.getNetworkManager(), context);
+      leader.connected(identity);
+      for (ONodeIdentity nodeIdentity : activeNodes) {
+        leader.connected(nodeIdentity);
+        leader.join(nodeIdentity);
+      }
+      this.getSubmitContext().setLeader(identity);
+      this.context.triggerDatabaseElections();
     }
-    OLoopBackDistributedChannel loopback = new OLoopBackDistributedChannel(identity, submitContext, leader, follower);
-    leader.connected(identity, loopback);
-    this.getSubmitContext().setLeader(loopback);
   }
 
-  public synchronized void setExternalLeader(ODistributedChannel leader) {
+  public synchronized void setExternalLeader(ONodeIdentity leader, OLogId leaderLastValid) {
     if (this.leader != null) {
       this.leader.close();
       this.leader = null;
     }
     this.getSubmitContext().setLeader(leader);
+    getFollower().ping(leader, leaderLastValid);
   }
 
   public synchronized void close() {
@@ -74,6 +88,47 @@ public class OStructuralDistributedContext {
   public void execute(ONodeIdentity senderNode, OSessionOperationId operationId, OStructuralSubmitRequest request) {
     if (leader != null) {
       leader.receiveSubmit(senderNode, operationId, request);
+    }
+  }
+
+  private synchronized OSessionOperationId nextOpId() {
+    if (last == null) {
+      last = new OSessionOperationId(context.getNodeIdentity().getId());
+    } else {
+      last = last.next();
+    }
+    return last;
+  }
+
+  private synchronized OSessionOperationId getLastOpId() {
+    return last;
+  }
+
+  public Future<OStructuralSubmitResponse> forward(OStructuralSubmitRequest request) {
+    return getSubmitContext().send(nextOpId(), request);
+  }
+
+  public void waitApplyLastRequest() {
+    OSessionOperationId lastOpId = getLastOpId();
+    if (lastOpId != null) {
+      follower.waitForExecution(lastOpId);
+    }
+  }
+
+  public OStructuralSubmitResponse forwardAndWait(OStructuralSubmitRequest request) {
+    return getSubmitContext().sendAndWait(nextOpId(), request);
+  }
+
+  public synchronized void connected(ONodeIdentity nodeIdentity) {
+    if (leader != null) {
+      leader.connected(nodeIdentity);
+      leader.join(nodeIdentity);
+    }
+  }
+
+  public synchronized void disconnected(ONodeIdentity nodeIdentity) {
+    if (leader != null) {
+      leader.disconnected(nodeIdentity);
     }
   }
 }
